@@ -1,7 +1,13 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { initializeDatabase } from './config/index.js';
+// Import d'Express et des modules nécessaires
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+
+// Import de la fonction d'initialisation des BDD
+const { initializeDatabase } = require('./config');
+
+// Import des routes d'authentification
+const authRoutes = require('./routes/authRoutes');
 
 // Charger les variables d'environnement
 dotenv.config();
@@ -26,9 +32,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ===================================
-// ROUTE DE TEST
+// ROUTES
 // ===================================
 
+// Route de bienvenue
 app.get('/', (req, res) =>
 {
     res.json({
@@ -50,6 +57,10 @@ app.get('/health', (req, res) =>
     });
 });
 
+// Routes d'authentification
+// Toutes les routes commencent par /api/auth
+app.use('/api/auth', authRoutes);
+
 // ===================================
 // GESTION DES ERREURS 404
 // ===================================
@@ -57,7 +68,8 @@ app.get('/health', (req, res) =>
 app.use((req, res) =>
 {
     res.status(404).json({
-        error: 'Route non trouvée',
+        success: false,
+        message: 'Route non trouvée',
         path: req.path
     });
 });
@@ -106,4 +118,5 @@ const startServer = async () =>
 // Lancer le serveur
 startServer();
 
-export default app;
+// Export pour les tests
+module.exports = app;
