@@ -1,17 +1,17 @@
 // Import de bcrypt pour hasher les mots de passe
-const bcrypt = require('bcryptjs');
+import bcrypt from 'bcryptjs';
 
 // Import de la connexion MySQL
-const { query } = require('../config/mysql');
+import { query } from '../config/mysql.js';
 
 // Import des fonctions JWT
-const { generateToken } = require('../utils/jwt');
+import { generateToken } from '../utils/jwt.js';
 
 /**
  * Inscription d'un nouvel utilisateur
  * POST /api/auth/register
  */
-const register = async (req, res) =>
+export const register = async (req, res) =>
 {
     try
     {
@@ -101,7 +101,7 @@ const register = async (req, res) =>
  * Connexion d'un utilisateur existant
  * POST /api/auth/login
  */
-const login = async (req, res) =>
+export const login = async (req, res) =>
 {
     try
     {
@@ -183,7 +183,7 @@ const login = async (req, res) =>
  * Récupère le profil de l'utilisateur connecté
  * GET /api/auth/profile
  */
-const getProfile = async (req, res) =>
+export const getProfile = async (req, res) =>
 {
     try
     {
@@ -227,11 +227,4 @@ const getProfile = async (req, res) =>
             message: 'Erreur serveur lors de la récupération du profil.'
         });
     }
-};
-
-// On export les fonctions du controller
-module.exports = {
-    register,
-    login,
-    getProfile
 };

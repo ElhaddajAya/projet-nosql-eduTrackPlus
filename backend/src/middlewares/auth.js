@@ -1,11 +1,11 @@
 // Import des fonctions JWT qu'on a créées
-const { verifyToken } = require('../utils/jwt');
+import { verifyToken } from '../utils/jwt.js';
 
 /**
  * Middleware qui vérifie si l'utilisateur est authentifié
  * Ce middleware protège les routes qui nécessitent une connexion
  */
-const authenticate = async (req, res, next) =>
+export const authenticate = async (req, res, next) =>
 {
     try
     {
@@ -58,7 +58,7 @@ const authenticate = async (req, res, next) =>
  * Middleware qui vérifie si l'utilisateur a un rôle spécifique
  * @param {Array} roles - Liste des rôles autorisés (ex: ['admin', 'teacher'])
  */
-const authorize = (roles = []) =>
+export const authorize = (roles = []) =>
 {
     return (req, res, next) =>
     {
@@ -83,10 +83,4 @@ const authorize = (roles = []) =>
         // Si tout est bon, on passe au middleware suivant
         next();
     };
-};
-
-// On export les middlewares pour les utiliser dans les routes
-module.exports = {
-    authenticate,
-    authorize
 };

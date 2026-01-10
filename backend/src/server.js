@@ -1,13 +1,16 @@
 // Import d'Express et des modules nécessaires
-const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
 
 // Import de la fonction d'initialisation des BDD
-const { initializeDatabase } = require('./config');
+import { initializeDatabase } from './config/index.js';
 
 // Import des routes d'authentification
-const authRoutes = require('./routes/authRoutes');
+import authRoutes from './routes/authRoutes.js';
+
+// Import des routes de gestion
+import classRoutes from './routes/classRoutes.js';
 
 // Charger les variables d'environnement
 dotenv.config();
@@ -60,6 +63,10 @@ app.get('/health', (req, res) =>
 // Routes d'authentification
 // Toutes les routes commencent par /api/auth
 app.use('/api/auth', authRoutes);
+
+// Routes de gestion des classes
+// Toutes les routes commencent par /api/classes
+app.use('/api/classes', classRoutes);
 
 // ===================================
 // GESTION DES ERREURS 404
@@ -119,4 +126,4 @@ const startServer = async () =>
 startServer();
 
 // Export pour les tests
-module.exports = app;
+export default app;

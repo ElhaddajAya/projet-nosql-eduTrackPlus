@@ -1,12 +1,12 @@
 // Import de jsonwebtoken pour créer et vérifier les tokens
-const jwt = require('jsonwebtoken');
+import jwt from 'jsonwebtoken';
 
 /**
  * Génère un token JWT pour un utilisateur
  * @param {Object} payload - Les données à encoder dans le token (id, email, role)
  * @returns {string} - Le token JWT signé
  */
-const generateToken = (payload) =>
+export const generateToken = (payload) =>
 {
     // On récupère le secret depuis les variables d'environnement
     const secret = process.env.JWT_SECRET;
@@ -24,7 +24,7 @@ const generateToken = (payload) =>
  * @returns {Object} - Les données décodées du token
  * @throws {Error} - Si le token est invalide ou expiré
  */
-const verifyToken = (token) =>
+export const verifyToken = (token) =>
 {
     try
     {
@@ -40,10 +40,4 @@ const verifyToken = (token) =>
         // Si le token est expiré ou invalide, on lance une erreur
         throw new Error('Token invalide ou expiré');
     }
-};
-
-// On export les fonctions pour les utiliser ailleurs
-module.exports = {
-    generateToken,
-    verifyToken
 };

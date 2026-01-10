@@ -1,17 +1,17 @@
 // Import d'Express Router pour créer les routes
-const express = require('express');
+import express from 'express';
 const router = express.Router();
 
 // Import des controllers d'authentification
-const { register, login, getProfile } = require('../controllers/authController');
+import { register, login, getProfile } from '../controllers/authController.js';
 
 // Import du middleware d'authentification
-const { authenticate } = require('../middlewares/auth');
+import { authenticate } from '../middlewares/auth.js';
 
 /**
  * Route pour l'inscription d'un nouvel utilisateur
  * POST /api/auth/register
- * Body: { firstName, lastName, email, password, role, phoneNumber?, address? }
+ * Body: { firstName, lastName, email, password, role }
  */
 router.post('/register', register);
 
@@ -31,4 +31,4 @@ router.post('/login', login);
 router.get('/profile', authenticate, getProfile);
 
 // On export le router pour l'utiliser dans server.js
-module.exports = router;
+export default router;
