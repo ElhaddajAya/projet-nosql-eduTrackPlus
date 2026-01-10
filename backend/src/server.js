@@ -12,6 +12,7 @@ import authRoutes from './routes/authRoutes.js';
 // Import des routes de gestion
 import classRoutes from './routes/classRoutes.js';
 import matiereRoutes from './routes/matiereRoutes.js';
+import enseignantRoutes from './routes/enseignantRoutes.js';
 
 // Charger les variables d'environnement
 dotenv.config();
@@ -72,6 +73,10 @@ app.use('/api/classes', classRoutes);
 // Routes de gestion des matières
 // Toutes les routes commencent par /api/matieres
 app.use('/api/matieres', matiereRoutes);
+
+// Routes de gestion des enseignants
+// Toutes les routes commencent par /api/enseignants
+app.use('/api/enseignants', enseignantRoutes);
 
 // ===================================
 // GESTION DES ERREURS 404

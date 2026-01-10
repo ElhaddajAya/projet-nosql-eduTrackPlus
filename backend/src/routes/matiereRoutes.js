@@ -13,7 +13,7 @@ import
 } from '../controllers/matiereController.js';
 
 // Import des middlewares d'authentification
-import { authenticate, authorize } from '../middlewares/auth.js';
+import { authenticate, authorize } from '../middleware/auth.js';
 
 /**
  * Route pour récupérer toutes les matières

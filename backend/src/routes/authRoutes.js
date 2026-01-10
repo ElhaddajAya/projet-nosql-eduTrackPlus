@@ -6,7 +6,7 @@ const router = express.Router();
 import { register, login, getProfile } from '../controllers/authController.js';
 
 // Import du middleware d'authentification
-import { authenticate } from '../middlewares/auth.js';
+import { authenticate } from '../middleware/auth.js';
 
 /**
  * Route pour l'inscription d'un nouvel utilisateur
