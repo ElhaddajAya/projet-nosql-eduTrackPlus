@@ -13,6 +13,8 @@ import authRoutes from './routes/authRoutes.js';
 import classRoutes from './routes/classRoutes.js';
 import matiereRoutes from './routes/matiereRoutes.js';
 import enseignantRoutes from './routes/enseignantRoutes.js';
+import etudiantRoutes from './routes/etudiantRoutes.js';
+import coursRoutes from './routes/coursRoutes.js';
 
 // Charger les variables d'environnement
 dotenv.config();
@@ -77,6 +79,22 @@ app.use('/api/matieres', matiereRoutes);
 // Routes de gestion des enseignants
 // Toutes les routes commencent par /api/enseignants
 app.use('/api/enseignants', enseignantRoutes);
+
+// Routes de gestion des étudiants
+// Toutes les routes commencent par /api/etudiants
+app.use('/api/etudiants', etudiantRoutes);
+
+// Routes de gestion des cours
+// Toutes les routes commencent par /api/cours
+app.use('/api/cours', coursRoutes);
+
+// Routes de gestion des étudiants
+// Toutes les routes commencent par /api/etudiants
+app.use('/api/etudiants', etudiantRoutes);
+
+// Routes de gestion des cours
+// Toutes les routes commencent par /api/cours
+app.use('/api/cours', coursRoutes);
 
 // ===================================
 // GESTION DES ERREURS 404
