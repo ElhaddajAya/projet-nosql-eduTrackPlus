@@ -44,6 +44,15 @@ export const testNeo4jConnection = async () =>
 };
 
 // ===================================
+// FONCTION POUR CRÉER UNE SESSION
+// ===================================
+
+export const session = () =>
+{
+    return driver.session();
+};
+
+// ===================================
 // FONCTION POUR EXÉCUTER DES REQUÊTES
 // ===================================
 
@@ -75,5 +84,5 @@ process.on('SIGINT', async () =>
     process.exit(0);
 });
 
-// Export du driver
+// Export du driver par défaut
 export default driver;

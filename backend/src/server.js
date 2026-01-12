@@ -15,6 +15,12 @@ import matiereRoutes from './routes/matiereRoutes.js';
 import enseignantRoutes from './routes/enseignantRoutes.js';
 import etudiantRoutes from './routes/etudiantRoutes.js';
 import coursRoutes from './routes/coursRoutes.js';
+import scheduleRoutes from './routes/scheduleRoutes.js';
+import presenceRoutes from './routes/presenceRoutes.js';
+import remplacementRoutes from './routes/remplacementRoutes.js';
+import noteRoutes from './routes/noteRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 
 // Charger les variables d'environnement
 dotenv.config();
@@ -42,25 +48,13 @@ app.use(express.urlencoded({ extended: true }));
 // ROUTES
 // ===================================
 
-// Route de bienvenue
-app.get('/', (req, res) =>
-{
-    res.json({
-        message: '🎓 Bienvenue sur l\'API EduTrackPlus !',
-        version: '1.0.0',
-        status: 'En ligne ✅',
-        authors: ['Aya EL HADDAJ', 'Malak BAKHOUTI'],
-        project: '4IIR14 EMSI'
-    });
-});
-
 // Route de santé (health check)
 app.get('/health', (req, res) =>
 {
-    res.json({
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+    res.status(200).json({
+        success: true,
+        message: 'Le serveur fonctionne correctement !',
+        timestamp: new Date().toISOString()
     });
 });
 
@@ -88,13 +82,29 @@ app.use('/api/etudiants', etudiantRoutes);
 // Toutes les routes commencent par /api/cours
 app.use('/api/cours', coursRoutes);
 
-// Routes de gestion des étudiants
-// Toutes les routes commencent par /api/etudiants
-app.use('/api/etudiants', etudiantRoutes);
+// Routes de gestion de l'emploi du temps
+// Toutes les routes commencent par /api/emploi-temps
+app.use('/api/emploi-temps', scheduleRoutes);
 
-// Routes de gestion des cours
-// Toutes les routes commencent par /api/cours
-app.use('/api/cours', coursRoutes);
+// Routes de gestion des présences
+// Toutes les routes commencent par /api/presences
+app.use('/api/presences', presenceRoutes);
+
+// Routes de gestion des remplacements
+// Toutes les routes commencent par /api/remplacements
+app.use('/api/remplacements', remplacementRoutes);
+
+// Routes de gestion des notes
+// Toutes les routes commencent par /api/notes
+app.use('/api/notes', noteRoutes);
+
+// Routes de gestion des notifications
+// Toutes les routes commencent par /api/notifications
+app.use('/api/notifications', notificationRoutes);
+
+// Routes du tableau de bord
+// Toutes les routes commencent par /api/dashboard
+app.use('/api/dashboard', dashboardRoutes);
 
 // ===================================
 // GESTION DES ERREURS 404
@@ -104,8 +114,21 @@ app.use((req, res) =>
 {
     res.status(404).json({
         success: false,
-        message: 'Route non trouvée',
-        path: req.path
+        message: 'Route non trouvée.'
+    });
+});
+
+// ===================================
+// GESTION DES ERREURS GLOBALES
+// ===================================
+
+app.use((err, req, res, next) =>
+{
+    console.error('Erreur globale:', err);
+    res.status(500).json({
+        success: false,
+        message: 'Une erreur est survenue sur le serveur.',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
 });
 
@@ -115,43 +138,34 @@ app.use((req, res) =>
 
 const PORT = process.env.PORT || 5000;
 
-// Fonction pour démarrer le serveur
-const startServer = async () =>
-{
-    try
+// Initialiser les connexions aux bases de données puis démarrer le serveur
+initializeDatabase()
+    .then(() =>
     {
-        // Initialiser toutes les connexions aux bases de données
-        const dbConnected = await initializeDatabase();
-
-        // Démarrer le serveur Express
         app.listen(PORT, () =>
         {
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('🎓  EDUTRACKPLUS BACKEND - DÉMARRÉ AVEC SUCCÈS !');
-            console.log('═══════════════════════════════════════════════════════');
-            console.log(`🚀  Serveur en écoute sur le port ${PORT}`);
-            console.log(`🌐  URL: http://localhost:${PORT}`);
-            console.log(`📅  Date: ${new Date().toLocaleString('fr-FR')}`);
-            console.log(`🔧  Environnement: ${process.env.NODE_ENV || 'development'}`);
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('');
-
-            if (!dbConnected)
-            {
-                console.warn('⚠️   ATTENTION : Le serveur tourne mais certaines BDD ne sont pas connectées !');
-                console.log('');
-            }
+            console.log(`🚀 Serveur démarré sur le port ${PORT}`);
+            console.log(`📡 URL: http://localhost:${PORT}`);
+            console.log(`🏥 Health check: http://localhost:${PORT}/health`);
         });
-
-    } catch (error)
+    })
+    .catch((error) =>
     {
-        console.error('❌ Erreur lors du démarrage du serveur:', error.message);
+        console.error('❌ Erreur lors de l\'initialisation des bases de données:', error);
         process.exit(1);
-    }
-};
+    });
 
-// Lancer le serveur
-startServer();
+// Gestion de l'arrêt gracieux
+process.on('SIGTERM', () =>
+{
+    console.log('SIGTERM reçu, fermeture du serveur...');
+    process.exit(0);
+});
 
-// Export pour les tests
+process.on('SIGINT', () =>
+{
+    console.log('SIGINT reçu, fermeture du serveur...');
+    process.exit(0);
+});
+
 export default app;
