@@ -82,15 +82,15 @@ export const getEnseignantsDisponibles = async (req, res) =>
  */
 export const accepterRemplacement = async (req, res) =>
 {
-    const { id } = req.params; // id_remplacement
+    const { id } = req.params;
     const { id_enseignant_remplacant } = req.body;
 
     try
     {
-        // 1. Vérifier que la demande existe et est toujours en attente
+        // 1. Vérifier la demande
         const demande = await query(
             `SELECT * FROM remplacement 
-       WHERE id_remplacement = ? AND statut = 'demande'`,
+             WHERE id_remplacement = ? AND statut = 'demande'`,
             [id]
         );
 
@@ -104,7 +104,7 @@ export const accepterRemplacement = async (req, res) =>
 
         const demandeData = demande[0];
 
-        // 2. Vérifier que le remplaçant existe
+        // 2. Vérifier le remplaçant
         const remplacant = await query(
             `SELECT id_enseignant FROM Enseignant WHERE id_enseignant = ?`,
             [id_enseignant_remplacant]
@@ -118,90 +118,125 @@ export const accepterRemplacement = async (req, res) =>
             });
         }
 
-        // 3. Mettre à jour la séance MySQL → remplacée (bleu)
+        // ⚡ IMPORTANT : Déclarer les variables ICI pour qu'elles soient accessibles partout
+        const absentId = parseInt(demandeData.id_enseignant_absent);
+        const remplacantId = parseInt(id_enseignant_remplacant);
+        const seanceId = parseInt(demandeData.id_seance);
+        const date = demandeData.date_absence.toISOString().split('T')[0];
+
+        // 3. Mise à jour MySQL de la séance
         await query(
             `UPDATE seance 
-       SET statut = 'remplacee', 
-           code_couleur = 'bleu', 
-           id_enseignant_effectif = ?
-       WHERE id_seance = ?`,
+             SET statut = 'remplacee', 
+                 code_couleur = 'bleu', 
+                 id_enseignant_effectif = ?
+             WHERE id_seance = ?`,
             [id_enseignant_remplacant, demandeData.id_seance]
         );
 
-        // 4. Mettre à jour la demande MySQL
+        // 4. Mise à jour MySQL du remplacement
         await query(
             `UPDATE remplacement 
-       SET id_enseignant_remplacant = ?, 
-           statut = 'accepte', 
-           date_reponse = NOW()
-       WHERE id_remplacement = ?`,
+             SET id_enseignant_remplacant = ?, 
+                 statut = 'accepte', 
+                 date_reponse = NOW()
+             WHERE id_remplacement = ?`,
             [id_enseignant_remplacant, id]
         );
 
-        // 5. Synchroniser Neo4j : créer les relations temporaires
+        // 5. Synchronisation Neo4j avec transaction explicite
         const neoSession = getSession();
 
         try
         {
-            const absentId = parseInt(demandeData.id_enseignant_absent);
-            const remplacantId = parseInt(id_enseignant_remplacant);
-            const seanceId = parseInt(demandeData.id_seance);
-            const date = demandeData.date_absence.toISOString().split('T')[0];
+            console.log(`🔵 Tentative Neo4j pour remplacement ${id}:`);
+            console.log(`  - Absent: ${absentId}, Remplaçant: ${remplacantId}, Séance: ${seanceId}`);
+            console.log(`  - Date: ${date}`);
 
-            console.log(`Tentative Neo4j pour remplacement ${id}:`);
-            console.log(`  absentId: ${absentId} (type: ${typeof absentId})`);
-            console.log(`  remplacantId: ${remplacantId} (type: ${typeof remplacantId})`);
-            console.log(`  seanceId: ${seanceId} (type: ${typeof seanceId})`);
-            console.log(`  date: ${date}`);
+            // ⚡ UTILISER UNE TRANSACTION EXPLICITE
+            const tx = neoSession.beginTransaction();
 
-            // On crée d'abord les relations séparément pour éviter l'échec en chaîne
-            await neoSession.run(
-                `
-                MATCH (remplacant:Enseignant {id_enseignant: $remplacantId})
-                MATCH (absent:Enseignant {id_enseignant: $absentId})
-                MERGE (remplacant)-[:REPLACES {date: $date}]->(absent)
-                `,
-                { remplacantId, absentId, date }
-            );
+            try
+            {
+                // 1. Vérification des nœuds
+                const checkResult = await tx.run(
+                    `
+            OPTIONAL MATCH (remplacant:Enseignant {id_enseignant: $remplacantId})
+            OPTIONAL MATCH (absent:Enseignant {id_enseignant: $absentId})
+            OPTIONAL MATCH (seance:Seance {id_seance: $seanceId})
+            RETURN remplacant, absent, seance
+            `,
+                    { remplacantId, absentId, seanceId }
+                );
 
-            await neoSession.run(
-                `
-                MATCH (remplacant:Enseignant {id_enseignant: $remplacantId})
-                MATCH (seance:Seance {id_seance: $seanceId})
-                MERGE (remplacant)-[:TEACHES_TEMP]->(seance)
-                `,
-                { remplacantId, seanceId }
-            );
+                const record = checkResult.records[0];
+                console.log('🔍 Vérification des nœuds :');
+                console.log('  - Remplaçant:', record.get('remplacant') ? '✅ Existe' : '❌ N\'existe pas');
+                console.log('  - Absent:', record.get('absent') ? '✅ Existe' : '❌ N\'existe pas');
+                console.log('  - Séance:', record.get('seance') ? '✅ Existe' : '❌ N\'existe pas');
 
-            console.log(`Neo4j : relations REPLACES et TEACHES_TEMP créées pour remplacement ${id}`);
+                // 2. Création des relations
+                console.log('📝 Création des relations...');
+                const result = await tx.run(
+                    `
+            MATCH (remplacant:Enseignant {id_enseignant: $remplacantId})
+            MATCH (absent:Enseignant {id_enseignant: $absentId})
+            MATCH (seance:Seance {id_seance: $seanceId})
+            
+            MERGE (remplacant)-[r1:REPLACES {date: $date}]->(absent)
+            MERGE (remplacant)-[r2:TEACHES_TEMP]->(seance)
+            
+            RETURN remplacant.id_enseignant as remplacant_id, 
+                   absent.id_enseignant as absent_id, 
+                   seance.id_seance as seance_id,
+                   r1, r2
+            `,
+                    { remplacantId, absentId, seanceId, date }
+                );
+
+                // 3. COMMIT de la transaction (CRUCIAL !)
+                await tx.commit();
+                console.log('✅ Transaction Neo4j commitée avec succès !');
+
+                if (result.records.length > 0)
+                {
+                    const rel = result.records[0];
+                    console.log('📊 Relations créées :');
+                    console.log('  - REPLACES:', rel.get('r1') ? '✅' : '❌');
+                    console.log('  - TEACHES_TEMP:', rel.get('r2') ? '✅' : '❌');
+                }
+
+            } catch (txError)
+            {
+                // Rollback en cas d'erreur
+                await tx.rollback();
+                console.error('❌ Erreur dans la transaction Neo4j, rollback effectué:', txError.message);
+                throw txError;
+            }
 
         } catch (neoError)
         {
-            console.error('Erreur Neo4j lors du remplacement :', neoError.message);
+            console.error('❌ Erreur Neo4j globale:', neoError.message);
         } finally
         {
             await neoSession.close();
         }
 
-        // 6. Notifier l’enseignant remplaçant et l’enseignant absent
+        // 6. Notifications (utilise maintenant 'date' qui est définie plus haut)
         await Notification.create({
             id_utilisateur: id_enseignant_remplacant,
             type: 'remplacement',
             titre: 'Remplacement accepté',
             message: `Vous avez été assigné comme remplaçant pour la séance ${demandeData.id_seance}`,
-            metadata: {
-                id_seance: demandeData.id_seance
-            }
+            metadata: { id_seance: demandeData.id_seance }
         });
 
         await Notification.create({
             id_utilisateur: demandeData.id_enseignant_absent,
             type: 'remplacement',
             titre: 'Remplaçant trouvé',
-            message: `Un remplaçant a été trouvé pour votre absence du ${demandeData.date_absence.toISOString().split('T')[0]}`,
-            metadata: {
-                id_seance: demandeData.id_seance
-            }
+            message: `Un remplaçant a été trouvé pour votre absence du ${date}`,
+            metadata: { id_seance: demandeData.id_seance }
         });
 
         // 7. Réponse finale
@@ -212,10 +247,10 @@ export const accepterRemplacement = async (req, res) =>
 
     } catch (error)
     {
-        console.error('Erreur dans accepterRemplacement:', error);
+        console.error('❌ Erreur dans accepterRemplacement:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur lors de l’acceptation du remplacement.'
+            message: 'Erreur serveur lors de l\'acceptation du remplacement.'
         });
     }
 };
