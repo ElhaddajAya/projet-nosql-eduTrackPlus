@@ -1,6 +1,7 @@
 // Import des connexions
 import { query } from '../config/mysql.js';
-import { getNeo4jSession } from '../config/neo4j.js';
+import { runQuery } from '../config/neo4j.js';
+import neo4j from 'neo4j-driver';
 
 /**
  * Planifier une nouvelle séance
@@ -46,16 +47,18 @@ export const planifierSeance = async (req, res) =>
 
         // Vérifier conflit dans Neo4j (même salle, même créneau, même date)
         const neo4jSession = getNeo4jSession('WRITE');
-        const conflitResult = await neo4jSession.run(
-            `MATCH (s:Salle {id: $id_salle})<-[:IN_ROOM]-(seance:Seance)-[:SCHEDULED_AT]->(c:Creneau {id: $id_creneau})
-       WHERE seance.date = $date
-       RETURN seance`,
-            { id_salle, id_creneau, date: date_seance }
+        const conflitResult = await runQuery(
+            `
+            MATCH (s:Salle {id: $id_salle})<-[:IN_ROOM]-(seance:Seance)-[:SCHEDULED_AT]->(c:Creneau {id: $id_creneau})
+            WHERE seance.date = $date
+            RETURN seance
+            `,
+            { id_salle, id_creneau, date: date_seance },
+            neo4j.session.READ
         );
 
         if (conflitResult.records.length > 0)
         {
-            await neo4jSession.close();
             return res.status(409).json({
                 success: false,
                 message: 'Conflit : Cette salle est déjà occupée à ce créneau.',

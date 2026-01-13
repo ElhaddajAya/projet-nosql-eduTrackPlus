@@ -1,13 +1,8 @@
+// config/neo4j.js
 import neo4j from 'neo4j-driver';
 import dotenv from 'dotenv';
 
 dotenv.config();
-
-/**
- * ================================
- * CONFIGURATION NEO4J
- * ================================
- */
 
 const NEO4J_URI = process.env.NEO4J_URI || 'bolt://localhost:7687';
 const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
@@ -18,17 +13,11 @@ const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || 'password';
  */
 const driver = neo4j.driver(
     NEO4J_URI,
-    neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD),
-    {
-        maxConnectionPoolSize: 50,
-        connectionAcquisitionTimeout: 120000,
-    }
+    neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD)
 );
 
 /**
- * ================================
- * TEST DE CONNEXION
- * ================================
+ * Test de connexion (pour initializeDatabase)
  */
 export const testNeo4jConnection = async () =>
 {
@@ -36,12 +25,7 @@ export const testNeo4jConnection = async () =>
     try
     {
         await session.run('RETURN 1');
-        console.log('✅ Neo4j connecté avec succès');
         return true;
-    } catch (error)
-    {
-        console.error('❌ Erreur connexion Neo4j:', error.message);
-        return false;
     } finally
     {
         await session.close();
@@ -49,48 +33,19 @@ export const testNeo4jConnection = async () =>
 };
 
 /**
- * ================================
- * CRÉER UNE SESSION (READ / WRITE)
- * ================================
- */
-export const getNeo4jSession = (mode = 'READ') =>
-{
-    return driver.session({
-        defaultAccessMode:
-            mode === 'WRITE'
-                ? neo4j.session.WRITE
-                : neo4j.session.READ
-    });
-};
-
-/**
- * ================================
- * EXÉCUTER UNE REQUÊTE SIMPLE
- * ================================
- */
-/**
- * ================================
- * EXÉCUTER UNE REQUÊTE SIMPLE
- * ================================
+ * Fonction utilitaire pour exécuter une requête Cypher
+ * (tu l'utilises déjà dans certains controllers)
  */
 export const runQuery = async (cypher, params = {}, mode = 'READ') =>
 {
-    const session = getNeo4jSession(mode);
+    const session = driver.session({
+        defaultAccessMode: mode === 'WRITE' ? neo4j.session.WRITE : neo4j.session.READ
+    });
+
     try
     {
-        let result;
-        if (mode === 'WRITE')
-        {
-            result = await session.executeWrite(tx => tx.run(cypher, params));
-        } else
-        {
-            result = await session.executeRead(tx => tx.run(cypher, params));
-        }
-        return result.records.map(record => record.toObject());
-    } catch (error)
-    {
-        console.error('❌ Erreur requête Neo4j:', error.message);
-        throw error;
+        const result = await session.run(cypher, params);
+        return result;
     } finally
     {
         await session.close();
@@ -98,9 +53,13 @@ export const runQuery = async (cypher, params = {}, mode = 'READ') =>
 };
 
 /**
- * ================================
- * FERMETURE PROPRE DU DRIVER
- * ================================
+ * Fonction pour créer une nouvelle session (utilisée dans accepterRemplacement)
+ * C'EST ÇA QUI MANQUAIT !
+ */
+export const getSession = () => driver.session();
+
+/**
+ * Fermeture propre du driver
  */
 const closeNeo4j = async () =>
 {
