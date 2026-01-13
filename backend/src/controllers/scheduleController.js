@@ -1,6 +1,6 @@
 // Import des connexions
 import { query } from '../config/mysql.js';
-import { session } from '../config/neo4j.js';
+import { getNeo4jSession } from '../config/neo4j.js';
 
 /**
  * Planifier une nouvelle séance
@@ -45,7 +45,7 @@ export const planifierSeance = async (req, res) =>
         const id_enseignant_titulaire = cours[0].id_enseignant_titulaire;
 
         // Vérifier conflit dans Neo4j (même salle, même créneau, même date)
-        const neo4jSession = session();
+        const neo4jSession = getNeo4jSession('WRITE');
         const conflitResult = await neo4jSession.run(
             `MATCH (s:Salle {id: $id_salle})<-[:IN_ROOM]-(seance:Seance)-[:SCHEDULED_AT]->(c:Creneau {id: $id_creneau})
        WHERE seance.date = $date
@@ -198,7 +198,7 @@ export const updateStatutSeance = async (req, res) =>
         );
 
         // Mettre à jour Neo4j
-        const neo4jSession = session();
+        const neo4jSession = getNeo4jSession('WRITE');
         await neo4jSession.run(
             `MATCH (seance:Seance {id_seance: $id_seance})
        SET seance.statut = $statut
@@ -395,7 +395,7 @@ export const getSallesDisponibles = async (req, res) =>
         }
 
         // Requête Neo4j pour trouver les salles disponibles
-        const neo4jSession = session();
+        const neo4jSession = getNeo4jSession('READ');
         const result = await neo4jSession.run(
             `MATCH (s:Salle)-[:DISPONIBLE_A]->(c:Creneau {id: $id_creneau})
        WHERE NOT EXISTS {
