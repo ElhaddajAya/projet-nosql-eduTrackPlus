@@ -154,7 +154,7 @@ export default function StatisticsDashboard() {
     <div className='space-y-6'>
       {/* Titre global */}
       <div>
-        <h2 className='text-3xl font-bold'>Statistiques globales</h2>
+        <h2 className='text-2xl font-bold'>Statistiques globales</h2>
         <p className='text-gray-600'>
           Vue d’ensemble sur la présence, les utilisateurs et l’activité du jour
         </p>
