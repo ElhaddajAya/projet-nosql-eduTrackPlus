@@ -131,11 +131,11 @@ export const createEtudiant = async (req, res) =>
         } = req.body;
 
         // Validation
-        if (!id_utilisateur || !id_classe || !matricule || !date_inscription)
+        if (!id_utilisateur || !id_classe)
         {
             return res.status(400).json({
                 success: false,
-                message: 'Les champs id_utilisateur, id_classe, matricule et date_inscription sont obligatoires.'
+                message: "Les champs id_utilisateur et id_classe sont obligatoires."
             });
         }
 
@@ -443,5 +443,33 @@ export const deleteEtudiant = async (req, res) =>
             success: false,
             message: 'Erreur serveur lors de la suppression de l\'étudiant.'
         });
+    }
+};
+
+/**
+ * Récupérer les candidats étudiants (utilisateurs role='student' non encore ajoutés dans Etudiant)
+ * GET /api/etudiants/candidats
+ */
+export const getCandidatsEtudiants = async (req, res) =>
+{
+    try
+    {
+        const rows = await query(
+            `SELECT 
+         u.id_utilisateur,
+         u.prenom,
+         u.nom,
+         u.email
+       FROM Utilisateur u
+       LEFT JOIN Etudiant e ON e.id_utilisateur = u.id_utilisateur
+       WHERE u.role = 'student' AND e.id_etudiant IS NULL
+       ORDER BY u.nom ASC, u.prenom ASC`
+        );
+
+        return res.status(200).json({ success: true, count: rows.length, data: rows });
+    } catch (error)
+    {
+        console.error("Erreur candidats étudiants:", error);
+        return res.status(500).json({ success: false, message: "Erreur serveur." });
     }
 };

@@ -367,3 +367,57 @@ export const deleteClass = async (req, res) =>
         });
     }
 };
+
+/**
+ * GET /api/classes/:id/etudiants
+ */
+export const getClassStudents = async (req, res) =>
+{
+    try
+    {
+        const { id } = req.params;
+
+        // Vérifier que la classe existe
+        const existingClass = await query(
+            "SELECT id_classe FROM Classe WHERE id_classe = ?",
+            [id]
+        );
+
+        if (existingClass.length === 0)
+        {
+            return res.status(404).json({
+                success: false,
+                message: "Classe non trouvée.",
+            });
+        }
+
+        const students = await query(
+            `SELECT 
+         e.id_etudiant,
+         e.id_utilisateur,
+         e.matricule,
+         e.date_inscription,
+         u.prenom,
+         u.nom,
+         u.email
+       FROM Etudiant e
+       INNER JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+       WHERE e.id_classe = ?
+       ORDER BY u.nom ASC, u.prenom ASC`,
+            [id]
+        );
+
+        return res.status(200).json({
+            success: true,
+            count: students.length,
+            data: students,
+        });
+    } catch (error)
+    {
+        console.error("Erreur lors de la récupération des étudiants de la classe:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Erreur serveur lors de la récupération des étudiants.",
+        });
+    }
+};

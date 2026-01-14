@@ -1,54 +1,35 @@
-// Import d'Express Router
-import express from 'express';
+import express from "express";
 const router = express.Router();
 
-// Import des controllers de classe
 import
-{
-    getAllClasses,
-    getClassById,
-    createClass,
-    updateClass,
-    deleteClass
-} from '../controllers/classController.js';
+    {
+        getAllClasses,
+        getClassById,
+        createClass,
+        updateClass,
+        deleteClass,
+        getClassStudents,
+    } from "../controllers/classController.js";
 
-// Import des middlewares d'authentification
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize } from "../middleware/auth.js";
 
-/**
- * Route pour récupérer toutes les classes
- * GET /api/classes
- * Accessible par : admin, teacher, student (tout le monde authentifié)
- */
-router.get('/', authenticate, getAllClasses);
+// Routes pour la gestion des classes
+router.get("/", authenticate, getAllClasses);
 
-/**
- * Route pour récupérer une classe par son ID
- * GET /api/classes/:id
- * Accessible par : admin, teacher, student (tout le monde authentifié)
- */
-router.get('/:id', authenticate, getClassById);
+// IMPORTANT: route spécifique AVANT "/:id"
+router.get(
+    "/:id/etudiants",
+    authenticate,
+    authorize(["admin", "teacher"]),
+    getClassStudents
+);
 
-/**
- * Route pour créer une nouvelle classe
- * POST /api/classes
- * Accessible par : admin seulement
- */
-router.post('/', authenticate, authorize(['admin']), createClass);
+// Détails: une classe spécifique par son ID
+router.get("/:id", authenticate, getClassById);
 
-/**
- * Route pour modifier une classe
- * PUT /api/classes/:id
- * Accessible par : admin seulement
- */
-router.put('/:id', authenticate, authorize(['admin']), updateClass);
+// Créer, modifier et supprimer une classe (admin only)
+router.post("/", authenticate, authorize(["admin"]), createClass);
+router.put("/:id", authenticate, authorize(["admin"]), updateClass);
+router.delete("/:id", authenticate, authorize(["admin"]), deleteClass);
 
-/**
- * Route pour supprimer une classe
- * DELETE /api/classes/:id
- * Accessible par : admin seulement
- */
-router.delete('/:id', authenticate, authorize(['admin']), deleteClass);
-
-// On export le router
 export default router;

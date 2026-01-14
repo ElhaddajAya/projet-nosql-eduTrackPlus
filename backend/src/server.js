@@ -22,6 +22,7 @@ import noteRoutes from './routes/noteRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import utilisateurRoutes from "./routes/utilisateurRoutes.js";
+import filiereRoutes from "./routes/filiereRoutes.js";
 
 // Charger les variables d'environnement
 dotenv.config();
@@ -110,6 +111,10 @@ app.use('/api/dashboard', dashboardRoutes);
 // Routes de gestion des utilisateurs
 // Toutes les routes commencent par /api/utilisateurs
 app.use("/api/utilisateurs", utilisateurRoutes);
+
+// Routes de gestion des filières
+// Toutes les routes commencent par /api/filieres
+app.use("/api/filieres", filiereRoutes);
 
 // ===================================
 // GESTION DES ERREURS 404

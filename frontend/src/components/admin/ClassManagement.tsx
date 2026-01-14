@@ -1,186 +1,1139 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
-import { Label } from '../ui/label';
-import { Badge } from '../ui/badge';
-import { BookOpen, Plus, Users, Calendar, MapPin, Search } from 'lucide-react';
-import { classes, students, teachers } from '../../data/mockData';
-import { toast } from 'sonner@2.0.3';
+import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import axios from "axios";
+import { toast } from "sonner";
+import {
+  Plus,
+  Search,
+  Filter,
+  BookOpen,
+  Users,
+  Eye,
+  Edit,
+  Trash2,
+} from "lucide-react";
+
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../ui/card";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Badge } from "../ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../ui/alert-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import { ScrollArea } from "../ui/scroll-area";
+
+type Classe = {
+  id_classe: number;
+  nom_classe: string;
+  niveau: string;
+  annee_scolaire: string;
+  capacite_max?: number | null;
+  id_filiere: number;
+  nom_filiere?: string | null;
+  code_filiere?: string | null;
+  nom_departement?: string | null;
+};
+
+type Filiere = {
+  id_filiere: number;
+  nom_filiere: string;
+  code_filiere?: string | null;
+};
+
+type EtudiantClasse = {
+  id_etudiant: number;
+  id_utilisateur?: number;
+  id_classe?: number | null;
+  matricule?: string | null;
+  prenom: string;
+  nom: string;
+  email: string;
+};
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+function getAuthHeaders() {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export default function ClassManagement() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [classes, setClasses] = useState<Classe[]>([]);
+  const [filieres, setFilieres] = useState<Filiere[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const filteredClasses = classes.filter(cls =>
-    cls.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    cls.level.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterLevel, setFilterLevel] = useState("all");
 
-  const handleCreateClass = () => {
-    toast.success('Classe créée avec succès');
-    setIsCreateDialogOpen(false);
-  };
+  // Create dialog
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newClassData, setNewClassData] = useState({
+    nom_classe: "",
+    niveau: "",
+    annee_scolaire: "",
+    id_filiere: "",
+    capacite_max: "",
+  });
+
+  // Manage dialog (edit + delete)
+  const [isManageOpen, setIsManageOpen] = useState(false);
+  const [selectedClass, setSelectedClass] = useState<Classe | null>(null);
+  const [editData, setEditData] = useState({
+    nom_classe: "",
+    niveau: "",
+    annee_scolaire: "",
+    id_filiere: "",
+    capacite_max: "",
+  });
+
+  // Details dialog (students)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [students, setStudents] = useState<EtudiantClasse[]>([]);
+  const [studentSearch, setStudentSearch] = useState("");
+
+  // Assign dialog
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [allStudentsLoading, setAllStudentsLoading] = useState(false);
+  const [allStudents, setAllStudents] = useState<EtudiantClasse[]>([]);
+  const [assignSearch, setAssignSearch] = useState("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<
+    Record<number, boolean>
+  >({});
+
+  async function fetchClasses() {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/api/classes`, {
+        headers: getAuthHeaders(),
+      });
+      const data = res?.data?.data || res?.data || [];
+      setClasses(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      toast.error("Impossible de charger les classes");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchFilieres() {
+    try {
+      const res = await axios.get(`${API_BASE}/api/filieres`, {
+        headers: getAuthHeaders(),
+      });
+      const data = res?.data?.data || res?.data || [];
+      setFilieres(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setFilieres([]);
+    }
+  }
+
+  async function fetchStudentsByClass(classId: number) {
+    setStudentsLoading(true);
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/classes/${classId}/etudiants`,
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+      const data = res?.data?.data || res?.data || [];
+      setStudents(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setStudents([]);
+      toast.error("Impossible de charger les étudiants de cette classe");
+    } finally {
+      setStudentsLoading(false);
+    }
+  }
+
+  async function fetchAllStudents() {
+    setAllStudentsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/api/etudiants`, {
+        headers: getAuthHeaders(),
+      });
+      const data = res?.data?.data || res?.data || [];
+      setAllStudents(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setAllStudents([]);
+      toast.error("Impossible de charger la liste des étudiants");
+    } finally {
+      setAllStudentsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchClasses();
+    fetchFilieres();
+  }, []);
+
+  const levels = useMemo(() => {
+    const unique = Array.from(
+      new Set(classes.map((c) => c.niveau).filter(Boolean))
+    );
+    return unique.sort();
+  }, [classes]);
+
+  const filteredClasses = useMemo(() => {
+    const s = searchTerm.trim().toLowerCase();
+    return classes.filter((cls) => {
+      const matchesSearch =
+        !s ||
+        cls.nom_classe.toLowerCase().includes(s) ||
+        cls.niveau.toLowerCase().includes(s) ||
+        (cls.annee_scolaire || "").toLowerCase().includes(s) ||
+        (cls.nom_filiere || "").toLowerCase().includes(s) ||
+        (cls.code_filiere || "").toLowerCase().includes(s);
+
+      const matchesLevel = filterLevel === "all" || cls.niveau === filterLevel;
+      return matchesSearch && matchesLevel;
+    });
+  }, [classes, searchTerm, filterLevel]);
+
+  const filteredStudents = useMemo(() => {
+    const s = studentSearch.trim().toLowerCase();
+    if (!s) return students;
+    return students.filter((e) => {
+      const fullName = `${e.prenom} ${e.nom}`.toLowerCase();
+      return (
+        fullName.includes(s) ||
+        e.email.toLowerCase().includes(s) ||
+        (e.matricule || "").toLowerCase().includes(s)
+      );
+    });
+  }, [students, studentSearch]);
+
+  const assignableStudents = useMemo(() => {
+    if (!selectedClass) return [];
+
+    // seulement les étudiants NON assignés à une classe
+    const base = allStudents.filter((s) => s.id_classe == null);
+
+    const q = assignSearch.trim().toLowerCase();
+    if (!q) return base;
+
+    return base.filter((e) => {
+      const fullName = `${e.prenom} ${e.nom}`.toLowerCase();
+      return (
+        fullName.includes(q) ||
+        e.email.toLowerCase().includes(q) ||
+        (e.matricule || "").toLowerCase().includes(q)
+      );
+    });
+  }, [allStudents, assignSearch, selectedClass]);
+
+  function openManage(cls: Classe) {
+    setSelectedClass(cls);
+    setEditData({
+      nom_classe: cls.nom_classe || "",
+      niveau: cls.niveau || "",
+      annee_scolaire: cls.annee_scolaire || "",
+      id_filiere: String(cls.id_filiere ?? ""),
+      capacite_max: cls.capacite_max == null ? "" : String(cls.capacite_max),
+    });
+    setIsManageOpen(true);
+  }
+
+  async function openDetails(cls: Classe) {
+    setSelectedClass(cls);
+    setStudentSearch("");
+    setIsDetailsOpen(true);
+    await fetchStudentsByClass(cls.id_classe);
+  }
+
+  async function openAssignDialog() {
+    if (!selectedClass) return;
+
+    setAssignSearch("");
+    setSelectedStudentIds({});
+    setIsAssignOpen(true);
+
+    // Charger tous les étudiants (une seule fois quand on ouvre)
+    await fetchAllStudents();
+  }
+
+  function toggleStudent(id: number) {
+    setSelectedStudentIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function selectAllVisible() {
+    const ids = assignableStudents.map((s) => s.id_etudiant);
+    setSelectedStudentIds((prev) => {
+      const copy = { ...prev };
+      ids.forEach((id) => (copy[id] = true));
+      return copy;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedStudentIds({});
+  }
+
+  const selectedCount = useMemo(() => {
+    return Object.values(selectedStudentIds).filter(Boolean).length;
+  }, [selectedStudentIds]);
+
+  async function handleAssignSelected() {
+    if (!selectedClass) return;
+
+    const ids = Object.entries(selectedStudentIds)
+      .filter(([, v]) => v)
+      .map(([k]) => Number(k));
+
+    if (ids.length === 0) {
+      toast.error("Sélection vide", {
+        description: "Choisis au moins un étudiant.",
+      });
+      return;
+    }
+
+    setAssignLoading(true);
+    try {
+      // Bulk: on réutilise ton endpoint existant PUT /api/etudiants/:id (admin only)
+      await Promise.all(
+        ids.map((id) =>
+          axios.put(
+            `${API_BASE}/api/etudiants/${id}`,
+            { id_classe: selectedClass.id_classe },
+            { headers: getAuthHeaders() }
+          )
+        )
+      );
+
+      toast.success("Assignation réussie", {
+        description: `${ids.length} étudiant(s) assigné(s) à ${selectedClass.nom_classe}.`,
+      });
+
+      // Refresh: liste étudiants de la classe + classes (si tu veux garder stats à jour)
+      await fetchStudentsByClass(selectedClass.id_classe);
+      fetchClasses();
+
+      setIsAssignOpen(false);
+      setSelectedStudentIds({});
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Erreur assignation", {
+        description: err?.response?.data?.message || "Assignation impossible",
+      });
+    } finally {
+      setAssignLoading(false);
+    }
+  }
+
+  async function handleCreateClass(e: FormEvent) {
+    e.preventDefault();
+
+    if (
+      !newClassData.nom_classe ||
+      !newClassData.niveau ||
+      !newClassData.annee_scolaire ||
+      !newClassData.id_filiere
+    ) {
+      toast.error("Erreur création classe", {
+        description:
+          "Tous les champs obligatoires doivent être remplis (nom, niveau, année scolaire, filière).",
+      });
+      return;
+    }
+
+    try {
+      await axios.post(
+        `${API_BASE}/api/classes`,
+        {
+          nom_classe: newClassData.nom_classe,
+          niveau: newClassData.niveau,
+          annee_scolaire: newClassData.annee_scolaire,
+          id_filiere: Number(newClassData.id_filiere),
+          capacite_max: newClassData.capacite_max
+            ? Number(newClassData.capacite_max)
+            : undefined,
+        },
+        { headers: getAuthHeaders() }
+      );
+
+      toast.success("Classe créée avec succès");
+      setIsCreateOpen(false);
+      setNewClassData({
+        nom_classe: "",
+        niveau: "",
+        annee_scolaire: "",
+        id_filiere: "",
+        capacite_max: "",
+      });
+      fetchClasses();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Erreur création classe", {
+        description: err?.response?.data?.message || "Création impossible",
+      });
+    }
+  }
+
+  async function handleUpdateClass(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedClass) return;
+
+    if (
+      !editData.nom_classe ||
+      !editData.niveau ||
+      !editData.annee_scolaire ||
+      !editData.id_filiere
+    ) {
+      toast.error("Erreur modification", {
+        description: "Tous les champs obligatoires doivent être remplis.",
+      });
+      return;
+    }
+
+    try {
+      await axios.put(
+        `${API_BASE}/api/classes/${selectedClass.id_classe}`,
+        {
+          nom_classe: editData.nom_classe,
+          niveau: editData.niveau,
+          annee_scolaire: editData.annee_scolaire,
+          id_filiere: Number(editData.id_filiere),
+          capacite_max: editData.capacite_max
+            ? Number(editData.capacite_max)
+            : undefined,
+        },
+        { headers: getAuthHeaders() }
+      );
+
+      toast.success("Classe modifiée avec succès");
+      setIsManageOpen(false);
+      setSelectedClass(null);
+      fetchClasses();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Erreur modification", {
+        description: err?.response?.data?.message || "Modification impossible",
+      });
+    }
+  }
+
+  async function handleDeleteClass() {
+    if (!selectedClass) return;
+
+    try {
+      await axios.delete(`${API_BASE}/api/classes/${selectedClass.id_classe}`, {
+        headers: getAuthHeaders(),
+      });
+
+      toast.success("Classe supprimée");
+      setIsManageOpen(false);
+      setSelectedClass(null);
+      fetchClasses();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Erreur suppression", {
+        description: err?.response?.data?.message || "Suppression impossible",
+      });
+    }
+  }
 
   return (
-    <div className="space-y-6">
+    <div className='space-y-6'>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className='flex items-center justify-between'>
         <div>
-          <h2 className="text-2xl">Gestion des Classes</h2>
-          <p className="text-gray-500">Créer des classes et attribuer les élèves</p>
+          <h2 className='text-2xl'>Gestion des Classes</h2>
+          <p className='text-gray-500'>Créer, consulter et gérer les classes</p>
         </div>
-        
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+
+        <Dialog
+          open={isCreateOpen}
+          onOpenChange={setIsCreateOpen}
+        >
           <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
+            <Button className='gap-2'>
+              <Plus className='h-4 w-4' />
               Créer une classe
             </Button>
           </DialogTrigger>
-          <DialogContent>
+
+          <DialogContent className='max-w-md'>
             <DialogHeader>
               <DialogTitle>Créer une nouvelle classe</DialogTitle>
               <DialogDescription>
-                Ajouter une classe et gérer ses attributions
+                Renseigne les informations de base
               </DialogDescription>
             </DialogHeader>
-            
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Nom de la classe</Label>
-                <Input placeholder="Grade 10A - Mathématiques" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Niveau</Label>
-                  <Input placeholder="Grade 10A" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Filière</Label>
-                  <Input placeholder="Sciences" />
-                </div>
-              </div>
-            </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Annuler
-              </Button>
-              <Button onClick={handleCreateClass}>
-                Créer la classe
-              </Button>
-            </DialogFooter>
+            <form
+              className='space-y-4 py-4'
+              onSubmit={handleCreateClass}
+            >
+              <div className='space-y-2'>
+                <Label>Nom de la classe</Label>
+                <Input
+                  value={newClassData.nom_classe}
+                  onChange={(e) =>
+                    setNewClassData((p) => ({
+                      ...p,
+                      nom_classe: e.target.value,
+                    }))
+                  }
+                  placeholder='Ex: GI-1A'
+                />
+              </div>
+
+              <div className='space-y-2'>
+                <Label>Niveau</Label>
+                <Input
+                  value={newClassData.niveau}
+                  onChange={(e) =>
+                    setNewClassData((p) => ({ ...p, niveau: e.target.value }))
+                  }
+                  placeholder='Ex: 1ère année'
+                />
+              </div>
+
+              <div className='space-y-2'>
+                <Label>Année scolaire</Label>
+                <Input
+                  value={newClassData.annee_scolaire}
+                  onChange={(e) =>
+                    setNewClassData((p) => ({
+                      ...p,
+                      annee_scolaire: e.target.value,
+                    }))
+                  }
+                  placeholder='Ex: 2024-2025'
+                />
+              </div>
+
+              <div className='space-y-2'>
+                <Label>Filière</Label>
+                <Select
+                  value={newClassData.id_filiere}
+                  onValueChange={(value) =>
+                    setNewClassData((p) => ({ ...p, id_filiere: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        filieres.length
+                          ? "Sélectionner une filière"
+                          : "Aucune filière disponible"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filieres.map((f) => (
+                      <SelectItem
+                        key={f.id_filiere}
+                        value={String(f.id_filiere)}
+                      >
+                        {f.nom_filiere}{" "}
+                        {f.code_filiere ? `(${f.code_filiere})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!filieres.length && (
+                  <p className='text-xs text-gray-500'>
+                    La liste des filières vient de{" "}
+                    <span className='font-mono'>/api/filieres</span>.
+                  </p>
+                )}
+              </div>
+
+              <div className='space-y-2'>
+                <Label>Capacité max (optionnel)</Label>
+                <Input
+                  value={newClassData.capacite_max}
+                  onChange={(e) =>
+                    setNewClassData((p) => ({
+                      ...p,
+                      capacite_max: e.target.value,
+                    }))
+                  }
+                  placeholder='Ex: 30'
+                />
+              </div>
+
+              <DialogFooter>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={() => setIsCreateOpen(false)}
+                >
+                  Annuler
+                </Button>
+                <Button type='submit'>Créer</Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
         <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='pt-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm text-gray-500">Classes Actives</p>
-                <p className="text-2xl">{classes.length}</p>
+                <p className='text-sm text-gray-500'>Total Classes</p>
+                <p className='text-2xl'>{classes.length}</p>
               </div>
-              <BookOpen className="h-8 w-8 text-blue-600" />
+              <BookOpen className='h-8 w-8 text-indigo-600' />
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='pt-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm text-gray-500">Total Étudiants</p>
-                <p className="text-2xl">{students.length}</p>
+                <p className='text-sm text-gray-500'>Filières</p>
+                <p className='text-2xl'>{filieres.length}</p>
               </div>
-              <Users className="h-8 w-8 text-green-600" />
+              <Filter className='h-8 w-8 text-gray-700' />
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='pt-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm text-gray-500">Total Professeurs</p>
-                <p className="text-2xl">{teachers.length}</p>
+                <p className='text-sm text-gray-500'>Affichées</p>
+                <p className='text-2xl'>{filteredClasses.length}</p>
               </div>
-              <Users className="h-8 w-8 text-indigo-600" />
+              <Users className='h-8 w-8 text-blue-600' />
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Search */}
+      {/* Filters + list */}
       <Card>
         <CardHeader>
           <CardTitle>Liste des Classes</CardTitle>
-          <CardDescription>Gérer les classes et leurs attributions</CardDescription>
+          <CardDescription>Rechercher et filtrer les classes</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Rechercher une classe..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+
+        <CardContent className='space-y-4'>
+          <div className='flex gap-4'>
+            <div className='relative flex-1'>
+              <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400' />
+              <Input
+                placeholder='Rechercher par nom, niveau, année, filière...'
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className='pl-10'
+              />
+            </div>
+
+            <Select
+              value={filterLevel}
+              onValueChange={setFilterLevel}
+            >
+              <SelectTrigger className='w-48'>
+                <SelectValue placeholder='Tous les niveaux' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>Tous les niveaux</SelectItem>
+                {levels.map((lvl) => (
+                  <SelectItem
+                    key={lvl}
+                    value={lvl}
+                  >
+                    {lvl}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Classes Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredClasses.map((cls) => {
-              const classStudents = students.filter(s => s.classId === cls.id);
-              const classTeachers = teachers.filter(t => cls.teacherIds.includes(t.id));
-              
-              return (
-                <Card key={cls.id} className="hover:shadow-md transition-shadow">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
+          {loading ? (
+            <div className='py-10 text-center text-sm text-gray-500'>
+              Chargement...
+            </div>
+          ) : filteredClasses.length === 0 ? (
+            <div className='py-10 text-center text-sm text-gray-500'>
+              Aucune classe trouvée
+            </div>
+          ) : (
+            <div className='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4'>
+              {filteredClasses.map((cls) => (
+                <Card
+                  key={cls.id_classe}
+                  className='hover:shadow-md transition-shadow'
+                >
+                  <CardHeader className='pb-3'>
+                    <div className='flex items-start justify-between'>
                       <div>
-                        <CardTitle className="text-lg">{cls.level}</CardTitle>
-                        <CardDescription>{cls.field}</CardDescription>
+                        <CardTitle className='text-lg'>
+                          {cls.nom_classe}
+                        </CardTitle>
+                        <CardDescription>
+                          {cls.niveau} • {cls.annee_scolaire}
+                        </CardDescription>
                       </div>
-                      <BookOpen className="h-5 w-5 text-indigo-600" />
+                      <BookOpen className='h-5 w-5 text-indigo-600' />
                     </div>
                   </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Users className="h-4 w-4 text-gray-400" />
-                      <span>{classStudents.length} étudiants</span>
-                    </div>
-                    
-                    <div>
-                      <p className="text-xs text-gray-500 mb-2">Professeurs assignés:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {classTeachers.map(teacher => (
-                          <Badge key={teacher.id} variant="secondary" className="text-xs">
-                            {teacher.firstName} {teacher.lastName}
-                          </Badge>
-                        ))}
-                      </div>
+
+                  <CardContent className='space-y-3'>
+                    <div className='flex flex-wrap gap-2'>
+                      {cls.nom_filiere ? (
+                        <Badge
+                          variant='secondary'
+                          className='text-xs'
+                        >
+                          {cls.nom_filiere}
+                          {cls.code_filiere ? ` (${cls.code_filiere})` : ""}
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant='secondary'
+                          className='text-xs'
+                        >
+                          Filière: —
+                        </Badge>
+                      )}
+
+                      {cls.nom_departement ? (
+                        <Badge
+                          variant='outline'
+                          className='text-xs'
+                        >
+                          {cls.nom_departement}
+                        </Badge>
+                      ) : null}
+
+                      <Badge
+                        variant='outline'
+                        className='text-xs'
+                      >
+                        Capacité: {cls.capacite_max ?? 30}
+                      </Badge>
                     </div>
 
-                    <div className="flex gap-2 pt-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        Voir détails
+                    <div className='flex gap-2 pt-2'>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        className='flex-1 gap-2'
+                        onClick={() => openDetails(cls)}
+                      >
+                        <Eye className='h-4 w-4' />
+                        Détails
                       </Button>
-                      <Button size="sm" className="flex-1">
+                      <Button
+                        size='sm'
+                        className='flex-1 gap-2'
+                        onClick={() => openManage(cls)}
+                      >
+                        <Edit className='h-4 w-4' />
                         Gérer
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Manage dialog */}
+      <Dialog
+        open={isManageOpen}
+        onOpenChange={setIsManageOpen}
+      >
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Gérer la classe</DialogTitle>
+            <DialogDescription>
+              {selectedClass
+                ? `${selectedClass.nom_classe} • ${selectedClass.annee_scolaire}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            className='space-y-4 py-2'
+            onSubmit={handleUpdateClass}
+          >
+            <div className='space-y-2'>
+              <Label>Nom</Label>
+              <Input
+                value={editData.nom_classe}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, nom_classe: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className='space-y-2'>
+              <Label>Niveau</Label>
+              <Input
+                value={editData.niveau}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, niveau: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className='space-y-2'>
+              <Label>Année scolaire</Label>
+              <Input
+                value={editData.annee_scolaire}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, annee_scolaire: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className='space-y-2'>
+              <Label>Filière</Label>
+              <Select
+                value={editData.id_filiere}
+                onValueChange={(value) =>
+                  setEditData((p) => ({ ...p, id_filiere: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder='Sélectionner une filière' />
+                </SelectTrigger>
+                <SelectContent>
+                  {filieres.map((f) => (
+                    <SelectItem
+                      key={f.id_filiere}
+                      value={String(f.id_filiere)}
+                    >
+                      {f.nom_filiere}{" "}
+                      {f.code_filiere ? `(${f.code_filiere})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className='space-y-2'>
+              <Label>Capacité max</Label>
+              <Input
+                value={editData.capacite_max}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, capacite_max: e.target.value }))
+                }
+                placeholder='Ex: 30'
+              />
+            </div>
+
+            <div className='flex items-center justify-between pt-2'>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type='button'
+                    variant='destructive'
+                    className='gap-2'
+                  >
+                    <Trash2 className='h-4 w-4' />
+                    Supprimer
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Supprimer cette classe ?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Cette action est définitive. Si la classe contient des
+                      étudiants, l’API peut refuser la suppression.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Annuler</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeleteClass}>
+                      Confirmer
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <div className='flex gap-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={() => setIsManageOpen(false)}
+                >
+                  Fermer
+                </Button>
+                <Button type='submit'>Enregistrer</Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Details dialog */}
+      <Dialog
+        open={isDetailsOpen}
+        onOpenChange={setIsDetailsOpen}
+      >
+        <DialogContent className='max-w-5xl w-[95vw]'>
+          <DialogHeader>
+            <DialogTitle>Détails de la classe</DialogTitle>
+            <DialogDescription>
+              {selectedClass
+                ? `${selectedClass.nom_classe} • ${selectedClass.niveau} • ${selectedClass.annee_scolaire}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className='space-y-4'>
+            <div className='flex items-center gap-3'>
+              <div className='relative flex-1'>
+                <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400' />
+                <Input
+                  className='pl-10'
+                  placeholder='Rechercher un étudiant (nom, email, matricule)...'
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                />
+              </div>
+              <Badge
+                variant='secondary'
+                className='text-xs'
+              >
+                {filteredStudents.length} étudiant(s)
+              </Badge>
+            </div>
+
+            <div className='border rounded-lg'>
+              <ScrollArea className='h-[520px]'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className='w-[220px]'>Nom</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead className='w-[160px]'>Matricule</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {studentsLoading ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={3}
+                          className='py-8 text-center text-sm text-gray-500'
+                        >
+                          Chargement...
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredStudents.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={3}
+                          className='py-8 text-center text-sm text-gray-500'
+                        >
+                          Aucun étudiant trouvé
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredStudents.map((e) => (
+                        <TableRow key={e.id_etudiant}>
+                          <TableCell className='font-medium'>
+                            {e.prenom} {e.nom}
+                          </TableCell>
+                          <TableCell>{e.email}</TableCell>
+                          <TableCell>{e.matricule || "—"}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+
+            <DialogFooter className='flex items-center justify-between'>
+              <Button
+                variant='outline'
+                onClick={openAssignDialog}
+                disabled={!selectedClass}
+              >
+                Assigner des étudiants
+              </Button>
+              <Button
+                variant='outline'
+                onClick={() => setIsDetailsOpen(false)}
+              >
+                Fermer
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign dialog */}
+      <Dialog
+        open={isAssignOpen}
+        onOpenChange={setIsAssignOpen}
+      >
+        <DialogContent className='max-w-5xl w-[95vw]'>
+          <DialogHeader>
+            <DialogTitle>Assigner des étudiants</DialogTitle>
+            <DialogDescription>
+              {selectedClass ? `Classe: ${selectedClass.nom_classe}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className='space-y-4'>
+            <div className='flex items-center gap-3'>
+              <div className='relative flex-1'>
+                <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400' />
+                <Input
+                  className='pl-10'
+                  placeholder='Rechercher (nom, email, matricule)...'
+                  value={assignSearch}
+                  onChange={(e) => setAssignSearch(e.target.value)}
+                />
+              </div>
+
+              <Badge
+                variant='secondary'
+                className='text-xs'
+              >
+                {selectedCount} sélectionné(s)
+              </Badge>
+
+              <Button
+                variant='outline'
+                onClick={selectAllVisible}
+                disabled={allStudentsLoading}
+              >
+                Tout sélectionner
+              </Button>
+              <Button
+                variant='outline'
+                onClick={clearSelection}
+                disabled={selectedCount === 0}
+              >
+                Effacer
+              </Button>
+            </div>
+
+            <div className='border rounded-lg'>
+              <ScrollArea className='h-[520px]'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className='w-[60px]'> </TableHead>
+                      <TableHead className='w-[260px]'>Nom</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead className='w-[160px]'>Matricule</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allStudentsLoading ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className='py-8 text-center text-sm text-gray-500'
+                        >
+                          Chargement...
+                        </TableCell>
+                      </TableRow>
+                    ) : assignableStudents.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className='py-8 text-center text-sm text-gray-500'
+                        >
+                          Aucun étudiant disponible
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      assignableStudents.map((e) => (
+                        <TableRow key={e.id_etudiant}>
+                          <TableCell className='align-middle'>
+                            <input
+                              type='checkbox'
+                              className='h-4 w-4'
+                              checked={!!selectedStudentIds[e.id_etudiant]}
+                              onChange={() => toggleStudent(e.id_etudiant)}
+                            />
+                          </TableCell>
+                          <TableCell className='font-medium'>
+                            {e.prenom} {e.nom}
+                          </TableCell>
+                          <TableCell>{e.email}</TableCell>
+                          <TableCell>{e.matricule || "—"}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant='outline'
+                onClick={() => setIsAssignOpen(false)}
+                disabled={assignLoading}
+              >
+                Annuler
+              </Button>
+              <Button
+                onClick={handleAssignSelected}
+                disabled={assignLoading || selectedCount === 0}
+              >
+                {assignLoading ? "Assignation..." : "Assigner"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
