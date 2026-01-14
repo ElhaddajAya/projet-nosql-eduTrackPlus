@@ -9,11 +9,19 @@ import
     getEtudiantById,
     createEtudiant,
     updateEtudiant,
-    deleteEtudiant
+    deleteEtudiant,
+    getCandidatsEtudiants
 } from '../controllers/etudiantController.js';
 
 // Import des middlewares d'authentification
 import { authenticate, authorize } from '../middleware/auth.js';
+
+/**
+ * Route pour récupérer tous les candidats étudiants
+ * GET /api/etudiants/candidats
+ * Accessible par : admin seulement
+ */
+router.get('/candidats', authenticate, authorize(['admin']), getCandidatsEtudiants);
 
 /**
  * Route pour récupérer tous les étudiants

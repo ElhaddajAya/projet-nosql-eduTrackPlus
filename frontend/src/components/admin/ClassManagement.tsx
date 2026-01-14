@@ -89,6 +89,14 @@ type EtudiantClasse = {
   email: string;
 };
 
+// ✅ Type pour les candidats (utilisateurs non encore étudiants)
+type CandidatEtudiant = {
+  id_utilisateur: number;
+  prenom: string;
+  nom: string;
+  email: string;
+};
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 function getAuthHeaders() {
@@ -131,13 +139,13 @@ export default function ClassManagement() {
   const [students, setStudents] = useState<EtudiantClasse[]>([]);
   const [studentSearch, setStudentSearch] = useState("");
 
-  // Assign dialog
+  // Assign dialog - ✅ MAINTENANT ON UTILISE DES CANDIDATS (utilisateurs)
   const [isAssignOpen, setIsAssignOpen] = useState(false);
   const [assignLoading, setAssignLoading] = useState(false);
-  const [allStudentsLoading, setAllStudentsLoading] = useState(false);
-  const [allStudents, setAllStudents] = useState<EtudiantClasse[]>([]);
+  const [candidatsLoading, setCandidatsLoading] = useState(false);
+  const [candidats, setCandidats] = useState<CandidatEtudiant[]>([]);
   const [assignSearch, setAssignSearch] = useState("");
-  const [selectedStudentIds, setSelectedStudentIds] = useState<
+  const [selectedCandidatIds, setSelectedCandidatIds] = useState<
     Record<number, boolean>
   >({});
 
@@ -190,20 +198,32 @@ export default function ClassManagement() {
     }
   }
 
-  async function fetchAllStudents() {
-    setAllStudentsLoading(true);
+  // ✅ NOUVELLE FONCTION : Récupérer les candidats (utilisateurs 'student' non encore dans Etudiant)
+  async function fetchCandidats() {
+    setCandidatsLoading(true);
     try {
-      const res = await axios.get(`${API_BASE}/api/etudiants`, {
+      const res = await axios.get(`${API_BASE}/api/etudiants/candidats`, {
         headers: getAuthHeaders(),
       });
       const data = res?.data?.data || res?.data || [];
-      setAllStudents(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error(err);
-      setAllStudents([]);
-      toast.error("Impossible de charger la liste des étudiants");
+
+      setCandidats(Array.isArray(data) ? data : []);
+
+      if (data.length === 0) {
+        toast.info("Aucun candidat disponible", {
+          description:
+            "Tous les utilisateurs 'student' sont déjà assignés à une classe.",
+        });
+      }
+    } catch (err: any) {
+      console.error("❌ Erreur fetchCandidats:", err);
+      setCandidats([]);
+      toast.error("Impossible de charger les candidats", {
+        description:
+          err?.response?.data?.message || err?.message || "Erreur réseau",
+      });
     } finally {
-      setAllStudentsLoading(false);
+      setCandidatsLoading(false);
     }
   }
 
@@ -248,24 +268,18 @@ export default function ClassManagement() {
     });
   }, [students, studentSearch]);
 
-  const assignableStudents = useMemo(() => {
+  // ✅ Filtrer les candidats selon la recherche
+  const assignableCandidats = useMemo(() => {
     if (!selectedClass) return [];
 
-    // seulement les étudiants NON assignés à une classe
-    const base = allStudents.filter((s) => s.id_classe == null);
-
     const q = assignSearch.trim().toLowerCase();
-    if (!q) return base;
+    if (!q) return candidats;
 
-    return base.filter((e) => {
-      const fullName = `${e.prenom} ${e.nom}`.toLowerCase();
-      return (
-        fullName.includes(q) ||
-        e.email.toLowerCase().includes(q) ||
-        (e.matricule || "").toLowerCase().includes(q)
-      );
+    return candidats.filter((c) => {
+      const fullName = `${c.prenom} ${c.nom}`.toLowerCase();
+      return fullName.includes(q) || c.email.toLowerCase().includes(q);
     });
-  }, [allStudents, assignSearch, selectedClass]);
+  }, [candidats, assignSearch, selectedClass]);
 
   function openManage(cls: Classe) {
     setSelectedClass(cls);
@@ -290,20 +304,20 @@ export default function ClassManagement() {
     if (!selectedClass) return;
 
     setAssignSearch("");
-    setSelectedStudentIds({});
+    setSelectedCandidatIds({});
     setIsAssignOpen(true);
 
-    // Charger tous les étudiants (une seule fois quand on ouvre)
-    await fetchAllStudents();
+    // ✅ Charger les candidats disponibles
+    await fetchCandidats();
   }
 
-  function toggleStudent(id: number) {
-    setSelectedStudentIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  function toggleCandidat(id: number) {
+    setSelectedCandidatIds((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
   function selectAllVisible() {
-    const ids = assignableStudents.map((s) => s.id_etudiant);
-    setSelectedStudentIds((prev) => {
+    const ids = assignableCandidats.map((c) => c.id_utilisateur);
+    setSelectedCandidatIds((prev) => {
       const copy = { ...prev };
       ids.forEach((id) => (copy[id] = true));
       return copy;
@@ -311,35 +325,40 @@ export default function ClassManagement() {
   }
 
   function clearSelection() {
-    setSelectedStudentIds({});
+    setSelectedCandidatIds({});
   }
 
   const selectedCount = useMemo(() => {
-    return Object.values(selectedStudentIds).filter(Boolean).length;
-  }, [selectedStudentIds]);
+    return Object.values(selectedCandidatIds).filter(Boolean).length;
+  }, [selectedCandidatIds]);
 
   async function handleAssignSelected() {
     if (!selectedClass) return;
 
-    const ids = Object.entries(selectedStudentIds)
+    const ids = Object.entries(selectedCandidatIds)
       .filter(([, v]) => v)
       .map(([k]) => Number(k));
 
     if (ids.length === 0) {
       toast.error("Sélection vide", {
-        description: "Choisis au moins un étudiant.",
+        description: "Choisis au moins un candidat.",
       });
       return;
     }
 
     setAssignLoading(true);
     try {
-      // Bulk: on réutilise ton endpoint existant PUT /api/etudiants/:id (admin only)
+      // ✅ CRÉER les étudiants avec POST /api/etudiants (pas PUT)
       await Promise.all(
-        ids.map((id) =>
-          axios.put(
-            `${API_BASE}/api/etudiants/${id}`,
-            { id_classe: selectedClass.id_classe },
+        ids.map((id_utilisateur) =>
+          axios.post(
+            `${API_BASE}/api/etudiants`,
+            {
+              id_utilisateur,
+              id_classe: selectedClass.id_classe,
+              matricule: `ETU-${Date.now()}-${id_utilisateur}`, // Générer un matricule
+              date_inscription: new Date().toISOString().split("T")[0],
+            },
             { headers: getAuthHeaders() }
           )
         )
@@ -349,12 +368,12 @@ export default function ClassManagement() {
         description: `${ids.length} étudiant(s) assigné(s) à ${selectedClass.nom_classe}.`,
       });
 
-      // Refresh: liste étudiants de la classe + classes (si tu veux garder stats à jour)
+      // Refresh
       await fetchStudentsByClass(selectedClass.id_classe);
       fetchClasses();
 
       setIsAssignOpen(false);
-      setSelectedStudentIds({});
+      setSelectedCandidatIds({});
     } catch (err: any) {
       console.error(err);
       toast.error("Erreur assignation", {
@@ -577,12 +596,6 @@ export default function ClassManagement() {
                     ))}
                   </SelectContent>
                 </Select>
-                {!filieres.length && (
-                  <p className='text-xs text-gray-500'>
-                    La liste des filières vient de{" "}
-                    <span className='font-mono'>/api/filieres</span>.
-                  </p>
-                )}
               </div>
 
               <div className='space-y-2'>
@@ -889,7 +902,7 @@ export default function ClassManagement() {
                     </AlertDialogTitle>
                     <AlertDialogDescription>
                       Cette action est définitive. Si la classe contient des
-                      étudiants, l’API peut refuser la suppression.
+                      étudiants, l'API peut refuser la suppression.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -921,7 +934,7 @@ export default function ClassManagement() {
         open={isDetailsOpen}
         onOpenChange={setIsDetailsOpen}
       >
-        <DialogContent className='max-w-5xl w-[95vw]'>
+        <DialogContent className='max-w-5xl w-[95vw] max-h-[85vh]'>
           <DialogHeader>
             <DialogTitle>Détails de la classe</DialogTitle>
             <DialogDescription>
@@ -951,7 +964,7 @@ export default function ClassManagement() {
             </div>
 
             <div className='border rounded-lg'>
-              <ScrollArea className='h-[520px]'>
+              <ScrollArea className='h-[480px]'>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1019,7 +1032,7 @@ export default function ClassManagement() {
         open={isAssignOpen}
         onOpenChange={setIsAssignOpen}
       >
-        <DialogContent className='max-w-5xl w-[95vw]'>
+        <DialogContent className='max-w-5xl w-[95vw] max-h-[85vh]'>
           <DialogHeader>
             <DialogTitle>Assigner des étudiants</DialogTitle>
             <DialogDescription>
@@ -1033,7 +1046,7 @@ export default function ClassManagement() {
                 <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400' />
                 <Input
                   className='pl-10'
-                  placeholder='Rechercher (nom, email, matricule)...'
+                  placeholder='Rechercher (nom, email)...'
                   value={assignSearch}
                   onChange={(e) => setAssignSearch(e.target.value)}
                 />
@@ -1049,7 +1062,7 @@ export default function ClassManagement() {
               <Button
                 variant='outline'
                 onClick={selectAllVisible}
-                disabled={allStudentsLoading}
+                disabled={candidatsLoading}
               >
                 Tout sélectionner
               </Button>
@@ -1063,51 +1076,49 @@ export default function ClassManagement() {
             </div>
 
             <div className='border rounded-lg'>
-              <ScrollArea className='h-[520px]'>
+              <ScrollArea className='h-[480px]'>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className='w-[60px]'> </TableHead>
                       <TableHead className='w-[260px]'>Nom</TableHead>
                       <TableHead>Email</TableHead>
-                      <TableHead className='w-[160px]'>Matricule</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allStudentsLoading ? (
+                    {candidatsLoading ? (
                       <TableRow>
                         <TableCell
-                          colSpan={4}
+                          colSpan={3}
                           className='py-8 text-center text-sm text-gray-500'
                         >
                           Chargement...
                         </TableCell>
                       </TableRow>
-                    ) : assignableStudents.length === 0 ? (
+                    ) : assignableCandidats.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={4}
+                          colSpan={3}
                           className='py-8 text-center text-sm text-gray-500'
                         >
-                          Aucun étudiant disponible
+                          Aucun candidat disponible
                         </TableCell>
                       </TableRow>
                     ) : (
-                      assignableStudents.map((e) => (
-                        <TableRow key={e.id_etudiant}>
+                      assignableCandidats.map((c) => (
+                        <TableRow key={c.id_utilisateur}>
                           <TableCell className='align-middle'>
                             <input
                               type='checkbox'
                               className='h-4 w-4'
-                              checked={!!selectedStudentIds[e.id_etudiant]}
-                              onChange={() => toggleStudent(e.id_etudiant)}
+                              checked={!!selectedCandidatIds[c.id_utilisateur]}
+                              onChange={() => toggleCandidat(c.id_utilisateur)}
                             />
                           </TableCell>
                           <TableCell className='font-medium'>
-                            {e.prenom} {e.nom}
+                            {c.prenom} {c.nom}
                           </TableCell>
-                          <TableCell>{e.email}</TableCell>
-                          <TableCell>{e.matricule || "—"}</TableCell>
+                          <TableCell>{c.email}</TableCell>
                         </TableRow>
                       ))
                     )}
