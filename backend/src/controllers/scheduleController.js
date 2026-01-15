@@ -1,94 +1,66 @@
-// Import des connexions
-import { runQuery, getNeo4jSession } from '../config/neo4j.js';
 import { query } from '../config/mysql.js';
+import { runQuery, getNeo4jSession } from '../config/neo4j.js';
 
 /**
- * Planifier une nouvelle séance
- * POST /api/emploi-temps/seances
+ * ⭐ PLANIFIER UNE SÉANCE
  */
 export const planifierSeance = async (req, res) =>
 {
     try
     {
-        console.log('🚀 DÉBUT planifierSeance');
-        console.log('📥 Body reçu:', req.body);
-
-        const {
+        let {
             id_cours,
             date_seance,
             heure_debut,
             heure_fin,
             id_salle,
             id_creneau,
-            id_enseignant_effectif // Optionnel
+            id_enseignant_effectif
         } = req.body;
 
-        // ========================================
-        // 1. VALIDATION
-        // ========================================
-        if (!id_cours || !date_seance || !heure_debut || !heure_fin || !id_salle || !id_creneau)
+        // Validation
+        if (!id_cours || !date_seance || !heure_debut || !heure_fin || !id_salle)
         {
-            console.log('❌ Champs manquants');
             return res.status(400).json({
                 success: false,
-                message: 'Tous les champs sont obligatoires (id_cours, date_seance, heure_debut, heure_fin, id_salle, id_creneau).',
+                message: 'Champs manquants'
             });
         }
 
-        // ========================================
-        // 2. VÉRIFIER LE COURS ET RÉCUPÉRER L'ENSEIGNANT TITULAIRE
-        // ========================================
-        console.log('🔍 Vérification du cours:', id_cours);
-
+        // Récupérer le cours
         const coursData = await query(
-            `SELECT 
-        co.id_enseignant_titulaire,
-        co.id_classe,
-        c.nom_classe,
-        m.nom_matiere
-       FROM Cours co
-       JOIN Classe c ON co.id_classe = c.id_classe
-       JOIN Matiere m ON co.id_matiere = m.id_matiere
-       WHERE co.id_cours = ?`,
+            'SELECT id_enseignant_titulaire, id_classe FROM Cours WHERE id_cours = ?',
             [id_cours]
         );
 
         if (coursData.length === 0)
         {
-            console.log('❌ Cours introuvable');
             return res.status(404).json({
                 success: false,
-                message: 'Cours non trouvé.',
+                message: 'Cours non trouvé'
             });
         }
 
-        const cours = coursData[0];
-        const id_enseignant_titulaire = cours.id_enseignant_titulaire;
-        const id_classe = cours.id_classe;
+        const id_enseignant_titulaire = coursData[0].id_enseignant_titulaire;
+        const id_classe = coursData[0].id_classe;
 
-        console.log('✅ Cours trouvé:', {
-            id_classe,
-            nom_classe: cours.nom_classe,
-            nom_matiere: cours.nom_matiere,
-            enseignant_titulaire: id_enseignant_titulaire
-        });
-
-        // ========================================
-        // 3. VÉRIFIER CONFLITS NEO4J (Salle occupée)
-        // ========================================
+        // Vérifier conflit Neo4j
         console.log('🔍 Vérification des conflits Neo4j...');
 
         try
         {
+            const id_salle_for_neo4j = String(id_salle);
+
             const conflitResult = await runQuery(
                 `
-        MATCH (seance:Seance)-[:IN_ROOM]->(s:Salle {id_salle: $id_salle})
-        WHERE seance.date = $date
-          AND seance.heure_debut = $heure_debut
+        MATCH (seance:Seance)-[:IN_ROOM]->(s:Salle)
+        WHERE s.id_salle = $id_salle OR s.nom = $id_salle
+        AND seance.date = $date
+        AND seance.heure_debut = $heure_debut
         RETURN seance
         `,
                 {
-                    id_salle: parseInt(id_salle),
+                    id_salle: id_salle_for_neo4j,
                     date: date_seance,
                     heure_debut
                 },
@@ -110,12 +82,9 @@ export const planifierSeance = async (req, res) =>
             console.warn('⚠️ Neo4j non disponible, skip vérification conflit');
         }
 
-        // ========================================
-        // 4. INSERTION MYSQL
-        // ========================================
+        // Insertion MySQL
         console.log('💾 Insertion dans MySQL...');
 
-        // Déterminer l'enseignant effectif
         const enseignant_effectif = id_enseignant_effectif || id_enseignant_titulaire;
 
         const result = await query(
@@ -129,35 +98,35 @@ export const planifierSeance = async (req, res) =>
         code_couleur, 
         id_enseignant_effectif
       ) VALUES (?, ?, ?, ?, ?, 'prevue', 'blanc', ?)`,
-            [id_cours, date_seance, heure_debut, heure_fin, id_salle, enseignant_effectif]
+            [id_cours, date_seance, heure_debut, heure_fin, String(id_salle), enseignant_effectif]
         );
 
         const id_seance = result.insertId;
         console.log('✅ Séance insérée dans MySQL, ID:', id_seance);
 
-        // ========================================
-        // 5. CRÉATION NEO4J (Séance + Salle si nécessaire)
-        // ========================================
+        // Synchronisation Neo4j
         console.log('🔷 Synchronisation Neo4j...');
 
         try
         {
             const neo4jSession = getNeo4jSession('WRITE');
 
-            // Créer le nœud Salle si n'existe pas
+            const salle_identifier = String(id_salle);
+
+            // Créer Salle
             await neo4jSession.run(
                 `MERGE (s:Salle {id_salle: $id_salle})
          ON CREATE SET s.nom = $nom_salle
          RETURN s`,
                 {
-                    id_salle: parseInt(id_salle),
-                    nom_salle: `Salle ${id_salle}`
+                    id_salle: salle_identifier,
+                    nom_salle: salle_identifier
                 }
             );
 
-            console.log('✅ Nœud Salle créé/trouvé');
+            console.log('✅ Nœud Salle créé/trouvé:', salle_identifier);
 
-            // Créer le nœud Créneau si n'existe pas
+            // Créer Créneau
             await neo4jSession.run(
                 `MERGE (c:Creneau {id_creneau: $id_creneau})
          ON CREATE SET c.heure_debut = $heure_debut,
@@ -172,7 +141,7 @@ export const planifierSeance = async (req, res) =>
 
             console.log('✅ Nœud Créneau créé/trouvé');
 
-            // Créer le nœud Séance et les relations
+            // Créer Séance + Relations
             await neo4jSession.run(
                 `MATCH (s:Salle {id_salle: $id_salle})
          MATCH (c:Creneau {id_creneau: $id_creneau})
@@ -193,7 +162,7 @@ export const planifierSeance = async (req, res) =>
                     date: date_seance,
                     heure_debut,
                     heure_fin,
-                    id_salle: parseInt(id_salle),
+                    id_salle: salle_identifier,
                     id_creneau
                 }
             );
@@ -206,185 +175,167 @@ export const planifierSeance = async (req, res) =>
             console.error('⚠️ Erreur Neo4j (non bloquante):', neoError.message);
         }
 
-        // ========================================
-        // 6. RÉCUPÉRER LA SÉANCE CRÉÉE
-        // ========================================
-        const seanceComplete = await query(
-            `SELECT 
-        s.*,
-        c.nom_classe,
-        m.nom_matiere,
-        u.prenom as prof_prenom,
-        u.nom as prof_nom
-       FROM Seance s
-       JOIN Cours co ON s.id_cours = co.id_cours
-       JOIN Classe c ON co.id_classe = c.id_classe
-       JOIN Matiere m ON co.id_matiere = m.id_matiere
-       LEFT JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
-       LEFT JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
-       WHERE s.id_seance = ?`,
-            [id_seance]
-        );
-
-        console.log('✅ Séance récupérée:', seanceComplete[0]);
-        console.log('✅ FIN planifierSeance - SUCCESS');
-
+        // Réponse
         res.status(201).json({
             success: true,
-            message: 'Séance planifiée avec succès.',
-            data: seanceComplete[0],
+            message: 'Séance planifiée avec succès',
+            data: {
+                id_seance,
+                id_cours,
+                date_seance,
+                heure_debut,
+                heure_fin,
+                id_salle,
+                id_classe,
+                id_enseignant_effectif: enseignant_effectif
+            }
         });
 
     } catch (error)
     {
-        console.error('❌ ERREUR planifierSeance:', error);
+        console.error('❌ Erreur planifierSeance:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur lors de la planification.',
-            error: error.message
+            message: 'Erreur serveur lors de la planification de la séance.'
         });
     }
 };
 
 /**
- * Mettre à jour le statut d'une séance (avec code couleur automatique)
- * PUT /api/emploi-temps/seances/:id/statut
+ * ⭐ METTRE À JOUR LE STATUT D'UNE SÉANCE
+ * - Reportée → Créer séance de rattrapage
+ * - Remplacée → Affecter nouvel enseignant
  */
 export const updateStatutSeance = async (req, res) =>
 {
     try
     {
-        console.log('🔄 UPDATE statut séance:', req.params.id);
-
         const { id } = req.params;
-        const { statut, id_enseignant_remplacant, date_report } = req.body;
+        const { statut, id_enseignant_remplacant, date_report, creer_seance_rattrapage } = req.body;
 
-        const statusValides = ['prevue', 'remplacee', 'reportee', 'annulee', 'rattrapage'];
-        if (!statusValides.includes(statut))
+        if (!statut)
         {
             return res.status(400).json({
                 success: false,
-                message: 'Statut invalide.',
+                message: 'Le statut est obligatoire.'
             });
         }
 
-        // Déterminer le code couleur selon le statut
-        let code_couleur;
-        let id_enseignant_effectif = null;
-
-        switch (statut)
-        {
-            case 'prevue':
-                code_couleur = 'blanc';
-                const cours = await query(
-                    `SELECT co.id_enseignant_titulaire 
-           FROM Seance s 
-           JOIN Cours co ON s.id_cours = co.id_cours 
-           WHERE s.id_seance = ?`,
-                    [id]
-                );
-                id_enseignant_effectif = cours[0]?.id_enseignant_titulaire;
-                break;
-            case 'remplacee':
-                code_couleur = 'bleu';
-                id_enseignant_effectif = id_enseignant_remplacant;
-                if (!id_enseignant_remplacant)
-                {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'id_enseignant_remplacant requis pour statut "remplacee".',
-                    });
-                }
-                break;
-            case 'reportee':
-                code_couleur = 'vert';
-                break;
-            case 'annulee':
-                code_couleur = 'rouge';
-                break;
-            case 'rattrapage':
-                code_couleur = 'violet';
-                break;
-        }
-
-        // Mettre à jour MySQL
-        const updates = ['statut = ?', 'code_couleur = ?'];
-        const values = [statut, code_couleur];
-
-        if (id_enseignant_effectif)
-        {
-            updates.push('id_enseignant_effectif = ?');
-            values.push(id_enseignant_effectif);
-        }
-
-        if (date_report)
-        {
-            updates.push('date_report = ?');
-            values.push(date_report);
-        }
-
-        values.push(id);
-
-        await query(
-            `UPDATE Seance SET ${updates.join(', ')} WHERE id_seance = ?`,
-            values
-        );
-
-        // Mettre à jour Neo4j
-        try
-        {
-            const neo4jSession = getNeo4jSession('WRITE');
-            await neo4jSession.run(
-                `MATCH (seance:Seance {id_seance: $id_seance})
-         SET seance.statut = $statut
-         RETURN seance`,
-                { id_seance: parseInt(id), statut }
-            );
-            await neo4jSession.close();
-        } catch (neoError)
-        {
-            console.warn('⚠️ Neo4j update failed (non-blocking)');
-        }
-
-        // Récupérer la séance mise à jour
-        const seance = await query(
-            `SELECT s.*, c.nom_classe, m.nom_matiere
-       FROM Seance s
-       JOIN Cours co ON s.id_cours = co.id_cours
-       JOIN Classe c ON co.id_classe = c.id_classe
-       JOIN Matiere m ON co.id_matiere = m.id_matiere
-       WHERE s.id_seance = ?`,
+        // Vérifier que la séance existe
+        const seanceData = await query(
+            'SELECT * FROM Seance WHERE id_seance = ?',
             [id]
         );
 
-        console.log('✅ Statut mis à jour');
+        if (seanceData.length === 0)
+        {
+            return res.status(404).json({
+                success: false,
+                message: 'Séance non trouvée.'
+            });
+        }
+
+        const seance = seanceData[0];
+
+        // Déterminer code couleur
+        const codeCouleurMap = {
+            'annulee': 'rouge',
+            'reportee': 'vert',
+            'rattrapage': 'violet',
+            'remplacee': 'bleu',
+            'prevue': 'blanc'
+        };
+
+        const code_couleur = codeCouleurMap[statut] || 'blanc';
+
+        // ⭐ CAS 1 : REMPLACÉE
+        if (statut === 'remplacee' && id_enseignant_remplacant)
+        {
+            await query(
+                `UPDATE Seance 
+         SET statut = ?, 
+             code_couleur = ?, 
+             id_enseignant_effectif = ?
+         WHERE id_seance = ?`,
+                [statut, code_couleur, id_enseignant_remplacant, id]
+            );
+        }
+        // ⭐ CAS 2 : REPORTÉE → Créer séance de rattrapage
+        else if (statut === 'reportee' && date_report && creer_seance_rattrapage)
+        {
+            // Mettre à jour séance originale
+            await query(
+                `UPDATE Seance 
+         SET statut = ?, 
+             code_couleur = ?, 
+             date_report = ?
+         WHERE id_seance = ?`,
+                [statut, code_couleur, date_report, id]
+            );
+
+            // ⭐ CRÉER SÉANCE DE RATTRAPAGE
+            const nouveauResultat = await query(
+                `INSERT INTO Seance (
+          id_cours, 
+          date_seance, 
+          heure_debut, 
+          heure_fin, 
+          id_salle, 
+          statut, 
+          code_couleur, 
+          id_enseignant_effectif,
+          id_seance_origine
+        ) VALUES (?, ?, ?, ?, ?, 'rattrapage', 'violet', ?, ?)`,
+                [
+                    seance.id_cours,
+                    date_report,
+                    seance.heure_debut,
+                    seance.heure_fin,
+                    seance.id_salle,
+                    seance.id_enseignant_effectif,
+                    id // ID séance originale
+                ]
+            );
+
+            console.log(`✅ Séance de rattrapage créée: ${nouveauResultat.insertId}`);
+        }
+        // ⭐ CAS 3 : AUTRES STATUTS
+        else
+        {
+            await query(
+                `UPDATE Seance 
+         SET statut = ?, 
+             code_couleur = ?
+         WHERE id_seance = ?`,
+                [statut, code_couleur, id]
+            );
+        }
 
         res.status(200).json({
             success: true,
-            message: 'Statut mis à jour.',
-            data: seance[0],
+            message: 'Statut de la séance mis à jour avec succès.'
         });
+
     } catch (error)
     {
-        console.error('❌ Erreur mise à jour statut:', error);
+        console.error('Erreur updateStatutSeance:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur.',
+            message: 'Erreur serveur lors de la mise à jour du statut.'
         });
     }
 };
 
 /**
- * Récupérer l'emploi du temps d'une classe
- * GET /api/emploi-temps/classe/:id
+ * ⭐ RÉCUPÉRER EMPLOI DU TEMPS D'UNE CLASSE
+ * - Inclure infos remplaçant
+ * - Inclure date_report
  */
 export const getEmploiTempsClasse = async (req, res) =>
 {
     try
     {
         const { id } = req.params;
-
-        console.log('📅 GET emploi du temps classe:', id);
 
         const seances = await query(
             `SELECT 
@@ -395,41 +346,45 @@ export const getEmploiTempsClasse = async (req, res) =>
         s.id_salle,
         s.statut,
         s.code_couleur,
+        s.date_report,
+        s.id_seance_origine,
         c.nom_classe,
         m.nom_matiere,
-        u.prenom as prof_prenom,
-        u.nom as prof_nom
-       FROM Seance s
-       JOIN Cours co ON s.id_cours = co.id_cours
-       JOIN Classe c ON co.id_classe = c.id_classe
-       JOIN Matiere m ON co.id_matiere = m.id_matiere
-       LEFT JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
-       LEFT JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
-       WHERE c.id_classe = ?
-       ORDER BY s.date_seance, s.heure_debut`,
+        u.prenom AS prof_prenom,
+        u.nom AS prof_nom,
+        ur.prenom AS remplacant_prenom,
+        ur.nom AS remplacant_nom
+      FROM Seance s
+      JOIN Cours co ON s.id_cours = co.id_cours
+      JOIN Classe c ON co.id_classe = c.id_classe
+      JOIN Matiere m ON co.id_matiere = m.id_matiere
+      LEFT JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
+      LEFT JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+      LEFT JOIN Enseignant er ON s.id_enseignant_effectif = er.id_enseignant AND s.statut = 'remplacee'
+      LEFT JOIN Utilisateur ur ON er.id_utilisateur = ur.id_utilisateur
+      WHERE c.id_classe = ?
+      ORDER BY s.date_seance, s.heure_debut`,
             [id]
         );
-
-        console.log(`✅ ${seances.length} séances trouvées pour classe ${id}`);
 
         res.status(200).json({
             success: true,
             count: seances.length,
-            data: seances,
+            data: seances
         });
+
     } catch (error)
     {
-        console.error('❌ Erreur EDT classe:', error);
+        console.error('Erreur getEmploiTempsClasse:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur.',
+            message: 'Erreur serveur.'
         });
     }
 };
 
 /**
- * Récupérer l'emploi du temps d'un enseignant
- * GET /api/emploi-temps/enseignant/:id
+ * ⭐ RÉCUPÉRER EMPLOI DU TEMPS D'UN ENSEIGNANT
  */
 export const getEmploiTempsEnseignant = async (req, res) =>
 {
@@ -448,33 +403,33 @@ export const getEmploiTempsEnseignant = async (req, res) =>
         s.code_couleur,
         c.nom_classe,
         m.nom_matiere
-       FROM Seance s
-       JOIN Cours co ON s.id_cours = co.id_cours
-       JOIN Classe c ON co.id_classe = c.id_classe
-       JOIN Matiere m ON co.id_matiere = m.id_matiere
-       WHERE s.id_enseignant_effectif = ?
-       ORDER BY s.date_seance, s.heure_debut`,
+      FROM Seance s
+      JOIN Cours co ON s.id_cours = co.id_cours
+      JOIN Classe c ON co.id_classe = c.id_classe
+      JOIN Matiere m ON co.id_matiere = m.id_matiere
+      WHERE s.id_enseignant_effectif = ?
+      ORDER BY s.date_seance, s.heure_debut`,
             [id]
         );
 
         res.status(200).json({
             success: true,
             count: seances.length,
-            data: seances,
+            data: seances
         });
+
     } catch (error)
     {
-        console.error('❌ Erreur EDT enseignant:', error);
+        console.error('Erreur getEmploiTempsEnseignant:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur.',
+            message: 'Erreur serveur.'
         });
     }
 };
 
 /**
- * Récupérer l'occupation d'une salle
- * GET /api/emploi-temps/salle/:id
+ * ⭐ RÉCUPÉRER OCCUPATION D'UNE SALLE
  */
 export const getOccupationSalle = async (req, res) =>
 {
@@ -489,41 +444,39 @@ export const getOccupationSalle = async (req, res) =>
         s.heure_debut,
         s.heure_fin,
         s.statut,
-        s.code_couleur,
         c.nom_classe,
         m.nom_matiere,
-        u.prenom as prof_prenom,
-        u.nom as prof_nom
-       FROM Seance s
-       JOIN Cours co ON s.id_cours = co.id_cours
-       JOIN Classe c ON co.id_classe = c.id_classe
-       JOIN Matiere m ON co.id_matiere = m.id_matiere
-       LEFT JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
-       LEFT JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
-       WHERE s.id_salle = ?
-       ORDER BY s.date_seance, s.heure_debut`,
+        u.prenom,
+        u.nom
+      FROM Seance s
+      JOIN Cours co ON s.id_cours = co.id_cours
+      JOIN Classe c ON co.id_classe = c.id_classe
+      JOIN Matiere m ON co.id_matiere = m.id_matiere
+      LEFT JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
+      LEFT JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+      WHERE s.id_salle = ?
+      ORDER BY s.date_seance, s.heure_debut`,
             [id]
         );
 
         res.status(200).json({
             success: true,
-            salle: id,
             count: seances.length,
-            data: seances,
+            data: seances
         });
+
     } catch (error)
     {
-        console.error('❌ Erreur occupation salle:', error);
+        console.error('Erreur getOccupationSalle:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur.',
+            message: 'Erreur serveur.'
         });
     }
 };
 
 /**
- * Trouver les salles disponibles pour un créneau donné
- * GET /api/emploi-temps/salles-disponibles
+ * ⭐ TROUVER SALLES DISPONIBLES
  */
 export const getSallesDisponibles = async (req, res) =>
 {
@@ -535,82 +488,39 @@ export const getSallesDisponibles = async (req, res) =>
         {
             return res.status(400).json({
                 success: false,
-                message: 'id_creneau et date requis.',
+                message: 'Paramètres manquants (id_creneau, date)'
             });
         }
 
-        // Requête Neo4j pour trouver les salles disponibles
-        try
-        {
-            const result = await runQuery(
-                `MATCH (s:Salle)
-         WHERE NOT EXISTS {
-           MATCH (s)<-[:IN_ROOM]-(seance:Seance)
-           WHERE seance.date = $date
-             AND seance.heure_debut = $heure_debut
-         }
-         RETURN s.id_salle as id_salle, 
-                s.nom as nom, 
-                s.type as type, 
-                s.capacite as capacite`,
-                { date, heure_debut: id_creneau.split('_')[1] + ':00' },
-                'READ'
-            );
+        const sallesOccupees = await query(
+            `SELECT DISTINCT s.id_salle
+       FROM Seance s
+       WHERE s.date_seance = ?`,
+            [date]
+        );
 
-            const salles = result.records.map((record) => ({
-                id_salle: record.get('id_salle'),
-                nom: record.get('nom'),
-                type: record.get('type') || 'Standard',
-                capacite: record.get('capacite') ? record.get('capacite').toNumber() : 30,
-            }));
+        const idsOccupes = sallesOccupees.map(s => s.id_salle);
 
-            res.status(200).json({
-                success: true,
-                count: salles.length,
-                data: salles,
-            });
-        } catch (neoError)
-        {
-            // Fallback MySQL si Neo4j indisponible
-            console.warn('⚠️ Neo4j indisponible, fallback MySQL');
+        const salles = await query(
+            'SELECT * FROM Salle'
+        );
 
-            const sallesOccupees = await query(
-                `SELECT DISTINCT id_salle 
-         FROM Seance 
-         WHERE date_seance = ? 
-           AND heure_debut = ?`,
-                [date, id_creneau.split('_')[1] + ':00']
-            );
+        const sallesDisponibles = salles.filter(
+            s => !idsOccupes.includes(s.id_salle)
+        );
 
-            const idsOccupes = sallesOccupees.map(s => s.id_salle);
+        res.status(200).json({
+            success: true,
+            count: sallesDisponibles.length,
+            data: sallesDisponibles
+        });
 
-            // Retourner les salles de 1 à 20 sauf occupées
-            const sallesDisponibles = [];
-            for (let i = 1; i <= 20; i++)
-            {
-                if (!idsOccupes.includes(i))
-                {
-                    sallesDisponibles.push({
-                        id_salle: i,
-                        nom: `Salle ${i}`,
-                        type: 'Standard',
-                        capacite: 30
-                    });
-                }
-            }
-
-            res.status(200).json({
-                success: true,
-                count: sallesDisponibles.length,
-                data: sallesDisponibles,
-            });
-        }
     } catch (error)
     {
-        console.error('❌ Erreur salles disponibles:', error);
+        console.error('Erreur getSallesDisponibles:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur.',
+            message: 'Erreur serveur.'
         });
     }
 };

@@ -26,7 +26,14 @@ import {
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
-import { Plus, MapPin, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import {
+  Plus,
+  MapPin,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -69,7 +76,7 @@ type ApiSeanceClasse = {
   date_seance: string;
   heure_debut: string;
   heure_fin: string;
-  id_salle: number;
+  id_salle: number | string; // Peut être numérique ou texte
   statut: BackendSeanceStatus;
   code_couleur?: string;
   nom_classe: string;
@@ -81,6 +88,7 @@ type ApiSeanceClasse = {
 type ApiCours = {
   id_cours: number;
   id_classe: number;
+  id_enseignant_titulaire: number;
   nom_matiere: string;
   nom_classe: string;
 };
@@ -153,7 +161,10 @@ const getDayKey = (isoDate: string): SessionUI["day"] => {
   if (js === 2) return "tuesday";
   if (js === 3) return "wednesday";
   if (js === 4) return "thursday";
-  return "friday";
+  if (js === 5) return "friday";
+
+  // Si weekend, retourner lundi par défaut
+  return "monday";
 };
 
 const dayPrefix = (day: SessionUI["day"]) => {
@@ -210,7 +221,7 @@ export default function ScheduleManagement() {
     () => new Date().toISOString().split("T")[0]
   );
 
-  // ⭐ Protection double soumission
+  // Protection double soumission
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // EDIT
@@ -271,10 +282,26 @@ export default function ScheduleManagement() {
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
   };
 
+  // ⭐ COURS FILTRÉS PAR CLASSE
   const coursForSelectedClass = useMemo(() => {
     if (!selectedClass) return [];
     return cours.filter((c) => String(c.id_classe) === String(selectedClass));
   }, [cours, selectedClass]);
+
+  // ⭐ ENSEIGNANTS FILTRÉS PAR COURS SÉLECTIONNÉ
+  const enseignantsForSelectedCours = useMemo(() => {
+    if (!addCoursId) return enseignants;
+
+    // Trouver le cours sélectionné
+    const selectedCours = cours.find((c) => String(c.id_cours) === addCoursId);
+
+    if (!selectedCours) return enseignants;
+
+    // Retourner seulement l'enseignant titulaire + tous les vacataires
+    return enseignants.filter(
+      (e) => e.id_enseignant === selectedCours.id_enseignant_titulaire || true // Pour l'instant, on affiche tous les profs
+    );
+  }, [addCoursId, cours, enseignants]);
 
   useEffect(() => {
     setAddCoursId("");
@@ -311,6 +338,7 @@ export default function ScheduleManagement() {
           const mapped: ApiCours[] = (rCours.data.data || []).map((c: any) => ({
             id_cours: c.id_cours,
             id_classe: c.id_classe,
+            id_enseignant_titulaire: c.id_enseignant_titulaire,
             nom_matiere: c.nom_matiere,
             nom_classe: c.nom_classe,
           }));
@@ -358,12 +386,34 @@ export default function ScheduleManagement() {
         console.log("📊 Total séances reçues:", all.length);
         console.log("📅 Semaine actuelle:", weekRange);
 
-        const filtered = all.filter((s) => {
-          const d = s.date_seance.split("T")[0];
-          return d >= weekRange.monday && d <= weekRange.friday;
+        // ⭐ LOG DÉTAILLÉ DE CHAQUE SÉANCE
+        all.forEach((s, idx) => {
+          const dateStr = s.date_seance.split("T")[0];
+          const dayOfWeek = new Date(s.date_seance).toLocaleDateString(
+            "fr-FR",
+            { weekday: "long" }
+          );
+          console.log(
+            `  [${idx + 1}] Séance ${s.id_seance}: ${
+              s.nom_matiere
+            } - ${dateStr} (${dayOfWeek}) ${s.heure_debut}-${s.heure_fin}`
+          );
         });
 
-        console.log("📋 Séances filtrées:", filtered.length);
+        const filtered = all.filter((s) => {
+          const d = s.date_seance.split("T")[0];
+          const isInWeek = d >= weekRange.monday && d <= weekRange.friday;
+
+          if (!isInWeek) {
+            console.log(`  ❌ Hors semaine: Séance ${s.id_seance} le ${d}`);
+          } else {
+            console.log(`  ✅ Dans la semaine: Séance ${s.id_seance} le ${d}`);
+          }
+
+          return isInWeek;
+        });
+
+        console.log("📋 Séances filtrées affichées:", filtered.length);
 
         const mapped: SessionUI[] = filtered.map((s) => ({
           id: String(s.id_seance),
@@ -372,7 +422,7 @@ export default function ScheduleManagement() {
           startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
           endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
           subject: s.nom_matiere,
-          room: `Room ${s.id_salle}`,
+          room: String(s.id_salle), // ⭐ GARDER FORMAT TEXTE
           status: toUIStatus(s.statut),
           teacherName:
             `${s.prof_prenom || ""} ${s.prof_nom || ""}`.trim() || "N/A",
@@ -411,10 +461,19 @@ export default function ScheduleManagement() {
       const all: ApiSeanceClasse[] = reload.data.data || [];
 
       console.log("📊 Après rechargement:", all.length, "séances");
+      console.log("📅 Semaine à afficher:", weekRange);
 
       const filtered = all.filter((s) => {
         const d = s.date_seance.split("T")[0];
-        return d >= weekRange.monday && d <= weekRange.friday;
+        const isInWeek = d >= weekRange.monday && d <= weekRange.friday;
+
+        if (!isInWeek) {
+          console.log(`  ❌ Séance ${s.id_seance} hors semaine: ${d}`);
+        } else {
+          console.log(`  ✅ Séance ${s.id_seance} dans la semaine: ${d}`);
+        }
+
+        return isInWeek;
       });
 
       console.log("📋 Filtrées:", filtered.length);
@@ -427,7 +486,7 @@ export default function ScheduleManagement() {
           startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
           endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
           subject: s.nom_matiere,
-          room: `Room ${s.id_salle}`,
+          room: String(s.id_salle), // ⭐ GARDER FORMAT TEXTE
           status: toUIStatus(s.statut),
           teacherName:
             `${s.prof_prenom || ""} ${s.prof_nom || ""}`.trim() || "N/A",
@@ -438,7 +497,7 @@ export default function ScheduleManagement() {
     }
   };
 
-  // ⭐ ADD SESSION FINAL
+  // ⭐ ADD SESSION ULTRA-FINAL
   const handleAddSession = async () => {
     if (isSubmitting) {
       console.log("⚠️ Déjà en cours");
@@ -459,14 +518,22 @@ export default function ScheduleManagement() {
         return;
       }
 
-      const id_salle = Number(addRoom.replace(/[^\d]/g, ""));
-      if (!id_salle) {
-        toast.error("Salle invalide (ex: 201)");
+      if (!addRoom.trim()) {
+        toast.error("Salle requise");
         return;
       }
 
       if (!addDate) {
         toast.error("Sélectionne une date");
+        return;
+      }
+
+      // ⭐ VÉRIFIER QUE LA DATE EST UN JOUR DE SEMAINE
+      const selectedDate = new Date(addDate);
+      const dayOfWeek = selectedDate.getDay();
+
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        toast.error("⚠️ Impossible de planifier un cours le weekend !");
         return;
       }
 
@@ -478,7 +545,7 @@ export default function ScheduleManagement() {
         date_seance: addDate,
         heure_debut: addStart,
         heure_fin: addEnd,
-        id_salle,
+        id_salle: addRoom, // ⭐ ENVOYER TEXTE BRUT
         id_creneau,
       };
 
@@ -487,6 +554,11 @@ export default function ScheduleManagement() {
       }
 
       console.log("📤 Payload:", payload);
+      console.log("📅 Date sélectionnée:", addDate);
+      console.log(
+        "📅 Jour de la semaine:",
+        ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][dayOfWeek]
+      );
 
       const res = await axios.post(`${API_URL}/emploi-temps/seances`, payload, {
         headers: { Authorization: `Bearer ${token}` },
@@ -510,13 +582,15 @@ export default function ScheduleManagement() {
       setAddStart("08:00");
       setAddEnd("10:00");
 
-      // Changer de semaine si nécessaire
+      // ⭐ CHANGER LA SEMAINE VERS LA DATE AJOUTÉE
+      console.log("📅 Changement de semaine vers:", addDate);
       setWeekDate(addDate);
 
-      // Attendre puis recharger
+      // ⭐ ATTENDRE QUE weekRange SE METTE À JOUR
       setTimeout(async () => {
+        console.log("🔄 Rechargement après délai...");
         await reloadSessionsForClass();
-      }, 300);
+      }, 500);
     } catch (e: any) {
       console.error("❌ Erreur:", e);
       toast.error(e?.response?.data?.message || "Erreur serveur");
@@ -587,12 +661,12 @@ export default function ScheduleManagement() {
             </Button>
           </DialogTrigger>
 
-          <DialogContent>
+          <DialogContent className='max-w-2xl'>
             <DialogHeader>
               <DialogTitle>Ajouter une séance</DialogTitle>
               <DialogDescription>
-                Créer une nouvelle séance pour la classe :{" "}
-                {selectedClassData?.nom_classe}
+                Créer une nouvelle séance pour :{" "}
+                <strong>{selectedClassData?.nom_classe}</strong>
               </DialogDescription>
             </DialogHeader>
 
@@ -625,7 +699,7 @@ export default function ScheduleManagement() {
                 <Select
                   value={addTeacherId}
                   onValueChange={setAddTeacherId}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !addCoursId}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -634,7 +708,7 @@ export default function ScheduleManagement() {
                     <SelectItem value='__auto'>
                       Auto (titulaire du cours)
                     </SelectItem>
-                    {enseignants.map((t) => (
+                    {enseignantsForSelectedCours.map((t) => (
                       <SelectItem
                         key={t.id_enseignant}
                         value={String(t.id_enseignant)}
@@ -648,23 +722,43 @@ export default function ScheduleManagement() {
 
               <div className='grid grid-cols-2 gap-4'>
                 <div className='space-y-2'>
-                  <Label>Date *</Label>
+                  <Label>Date * (Lun-Ven uniquement)</Label>
                   <Input
                     type='date'
                     value={addDate}
                     onChange={(e) => setAddDate(e.target.value)}
                     disabled={isSubmitting}
+                    min={new Date().toISOString().split("T")[0]}
                   />
+                  <p className='text-xs text-gray-500'>
+                    {addDate &&
+                      (() => {
+                        const d = new Date(addDate);
+                        const day = d.getDay();
+                        if (day === 0 || day === 6) {
+                          return (
+                            <span className='text-red-600 flex items-center gap-1'>
+                              <AlertCircle className='h-3 w-3' />
+                              Weekend non autorisé
+                            </span>
+                          );
+                        }
+                        return `${
+                          ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][day]
+                        }`;
+                      })()}
+                  </p>
                 </div>
 
                 <div className='space-y-2'>
-                  <Label>Salle * (numéro)</Label>
+                  <Label>Salle * (texte libre)</Label>
                   <Input
-                    placeholder='201'
+                    placeholder='A101, B444, Amphi...'
                     value={addRoom}
                     onChange={(e) => setAddRoom(e.target.value)}
                     disabled={isSubmitting}
                   />
+                  <p className='text-xs text-gray-500'>Ex: A101, B444, Amphi</p>
                 </div>
               </div>
 
@@ -847,7 +941,7 @@ export default function ScheduleManagement() {
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
+      {/* Edit Dialog - IDENTIQUE */}
       {editingSession && (
         <Dialog
           open={!!editingSession}
@@ -1030,7 +1124,10 @@ export default function ScheduleManagement() {
       <Card>
         <CardHeader>
           <CardTitle>Emploi du temps de la semaine</CardTitle>
-          <CardDescription>{selectedClassData?.nom_classe}</CardDescription>
+          <CardDescription>
+            {selectedClassData?.nom_classe} - Du {weekRange.monday} au{" "}
+            {weekRange.friday}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className='grid grid-cols-1 md:grid-cols-5 gap-4'>
@@ -1043,7 +1140,7 @@ export default function ScheduleManagement() {
                   className='space-y-3'
                 >
                   <div className='text-center pb-2 border-b'>
-                    <h3>{DAY_LABELS[day]}</h3>
+                    <h3 className='font-semibold'>{DAY_LABELS[day]}</h3>
                     <p className='text-xs text-gray-500'>
                       {daySessions.length} cours
                     </p>
@@ -1059,7 +1156,7 @@ export default function ScheduleManagement() {
                         onClick={() => setEditingSession(session)}
                       >
                         <div className='flex items-start justify-between mb-2'>
-                          <div className='text-sm text-indigo-700'>
+                          <div className='text-sm font-medium text-indigo-700'>
                             {session.startTime} - {session.endTime}
                           </div>
                           {session.status !== "normal" && (
