@@ -93,13 +93,29 @@ const mapBackendStatusToUI = (s: ApiSeance["statut"]): UISession["status"] => {
 };
 
 const getDayKey = (isoDate: string): UISession["day"] => {
-  const d = new Date(isoDate);
-  const js = d.getDay();
+  // Extraire la date directement sans parse timezone
+  const dateStr = isoDate.split("T")[0]; // "2026-01-20"
+  const [year, month, day] = dateStr.split("-").map(Number);
+
+  // Créer date en UTC pour éviter les décalages timezone
+  const d = new Date(Date.UTC(year, month - 1, day));
+  const js = d.getUTCDay(); // ⭐ Utiliser getUTCDay() au lieu de getDay()
+
+  console.log(
+    `🗓️ Date: ${dateStr} → Jour: ${js} (${
+      ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][js]
+    })`
+  );
+
   if (js === 1) return "monday";
   if (js === 2) return "tuesday";
   if (js === 3) return "wednesday";
   if (js === 4) return "thursday";
-  return "friday";
+  if (js === 5) return "friday";
+
+  // Si weekend, logger un warning
+  console.warn(`⚠️ Séance sur un weekend détectée: ${dateStr} (jour ${js})`);
+  return "monday"; // Fallback
 };
 
 function safeParseJson<T>(value: string | null): T | null {
