@@ -4,6 +4,7 @@ import { testNeo4jConnection } from './neo4j.js';
 import { connectRedis } from './redis.js';
 import { query } from './mysql.js';
 import { getSession } from './neo4j.js';
+import { syncCompleteNeo4j } from '../utils/syncCompleteNeo4j.js';
 
 // ===================================
 // SYNCHRONISATION ENSEIGNANTS → NEO4J
@@ -163,6 +164,15 @@ export const initializeDatabase = async () =>
         // SYNCHRONISATION DES ENSEIGNANTS ET SÉANCES VERS NEO4J
         await syncEnseignantsToNeo4j();
         await syncSeancesToNeo4j();
+
+        // ⭐ SYNCHRONISATION COMPLÈTE NEO4J
+        try
+        {
+            await syncCompleteNeo4j();
+        } catch (error)
+        {
+            console.error('❌ Erreur sync Neo4j (non bloquante):', error.message);
+        }
 
         return true;
     } else

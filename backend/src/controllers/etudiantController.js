@@ -473,3 +473,82 @@ export const getCandidatsEtudiants = async (req, res) =>
         return res.status(500).json({ success: false, message: "Erreur serveur." });
     }
 };
+
+/**
+ * Récupérer l'étudiant connecté (depuis le token JWT)
+ * GET /api/etudiants/me
+ */
+export const getMyProfile = async (req, res) =>
+{
+    try
+    {
+        console.log('🔍 GET /me appelé');
+        console.log('📋 req.user:', req.user);
+
+        // req.user est défini par le middleware authenticate
+        const id_utilisateur = req.user?.id_utilisateur;
+
+        if (!id_utilisateur)
+        {
+            console.error('❌ Pas de id_utilisateur dans req.user');
+            return res.status(401).json({
+                success: false,
+                message: 'Non authentifié'
+            });
+        }
+
+        console.log(`🔎 Recherche étudiant pour utilisateur ${id_utilisateur}...`);
+
+        // Récupérer l'étudiant correspondant
+        const etudiants = await query(
+            `SELECT 
+                e.id_etudiant,
+                e.id_utilisateur,
+                e.id_classe,
+                e.matricule,
+                e.date_naissance,
+                e.adresse,
+                e.telephone_etudiant,
+                e.telephone_parent,
+                e.date_inscription,
+                e.streak_count,
+                e.last_present_date,
+                e.bonus_gagnes,
+                u.prenom,
+                u.nom,
+                u.email,
+                c.nom_classe,
+                c.niveau,
+                c.annee_scolaire
+            FROM Etudiant e
+            INNER JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+            LEFT JOIN Classe c ON e.id_classe = c.id_classe
+            WHERE e.id_utilisateur = ?`,
+            [id_utilisateur]
+        );
+
+        if (etudiants.length === 0)
+        {
+            console.error(`❌ Aucun étudiant trouvé pour utilisateur ${id_utilisateur}`);
+            return res.status(404).json({
+                success: false,
+                message: 'Profil étudiant non trouvé. Es-tu bien enregistré comme étudiant ?'
+            });
+        }
+
+        console.log('✅ Étudiant trouvé:', etudiants[0]);
+
+        res.status(200).json({
+            success: true,
+            data: etudiants[0]
+        });
+
+    } catch (error)
+    {
+        console.error('❌ Erreur getMyProfile:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération du profil.'
+        });
+    }
+};

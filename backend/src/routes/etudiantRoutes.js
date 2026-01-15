@@ -10,11 +10,19 @@ import
     createEtudiant,
     updateEtudiant,
     deleteEtudiant,
-    getCandidatsEtudiants
+    getCandidatsEtudiants,
+    getMyProfile
 } from '../controllers/etudiantController.js';
 
 // Import des middlewares d'authentification
 import { authenticate, authorize } from '../middleware/auth.js';
+
+/**
+ * Route pour récupérer le Profil étudiant connecté
+ * GET /api/etudiants/me
+ * Accessible par : student seulement
+ */
+router.get('/me', authenticate, authorize(['student']), getMyProfile);
 
 /**
  * Route pour récupérer tous les candidats étudiants

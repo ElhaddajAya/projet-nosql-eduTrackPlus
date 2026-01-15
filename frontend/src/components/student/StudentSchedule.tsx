@@ -161,27 +161,34 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
       try {
         setLoading(true);
 
-        let idClasse = studentClassId;
+        // ⭐ NOUVELLE MÉTHODE : Appeler /api/etudiants/me
+        let idClasse = null;
 
-        // fallback: essayer /api/etudiants/:id si dispo
-        if (!idClasse) {
-          try {
-            const r = await axios.get(`${API_URL}/etudiants/${studentId}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            idClasse =
-              r.data?.data?.id_classe || r.data?.data?.classeId || null;
-          } catch {
-            // ignore, on affiche une erreur propre après
+        try {
+          const meRes = await axios.get(`${API_URL}/etudiants/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (meRes.data?.success) {
+            idClasse = meRes.data.data.id_classe;
+            console.log("✅ ID Classe récupéré:", idClasse);
           }
-        }
-
-        if (!idClasse) {
-          toast.error("Impossible de trouver la classe de l’étudiante");
+        } catch (error) {
+          console.error("❌ Erreur /me:", error);
+          toast.error("Impossible de récupérer ton profil étudiant");
           setUiSessions([]);
+          setLoading(false);
           return;
         }
 
+        if (!idClasse) {
+          toast.error("Tu n'es pas assigné à une classe");
+          setUiSessions([]);
+          setLoading(false);
+          return;
+        }
+
+        // Récupérer l'emploi du temps de la classe
         const res = await axios.get(
           `${API_URL}/emploi-temps/classe/${idClasse}`,
           {
@@ -204,7 +211,7 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
           startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
           endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
           subject: s.nom_matiere || "Cours",
-          room: `Room ${s.id_salle}`,
+          room: String(s.id_salle), // ⭐ Texte maintenant
           status: mapBackendStatusToUI(s.statut),
           teacherName:
             `${s.prof_prenom || ""} ${s.prof_nom || ""}`.trim() || "N/A",
@@ -225,8 +232,8 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
       }
     };
 
-    if (studentId) fetchSchedule();
-  }, [studentId, studentClassId, token]);
+    fetchSchedule(); // ⭐ Pas besoin de studentId maintenant
+  }, [token]); // ⭐ Dépendances : seulement token
 
   return (
     <div className='space-y-6'>
