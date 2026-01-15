@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Card,
   CardContent,
@@ -26,17 +26,11 @@ import {
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
-import {
-  Calendar,
-  Plus,
-  Clock,
-  MapPin,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
-import { classes, sessions, teachers } from "../../data/mockData";
-import { Session } from "../../types";
-import { toast } from "sonner@2.0.3";
+import { Plus, MapPin, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import axios from "axios";
+import { toast } from "sonner";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"] as const;
 const DAY_LABELS: Record<string, string> = {
@@ -63,34 +57,195 @@ const STATUS_LABELS: Record<string, string> = {
   replaced: "Remplacée",
 };
 
+type BackendSeanceStatus =
+  | "prevue"
+  | "remplacee"
+  | "reportee"
+  | "annulee"
+  | "rattrapage";
+
+type ApiSeanceClasse = {
+  id_seance: number;
+  date_seance: string;
+  heure_debut: string;
+  heure_fin: string;
+  id_salle: number;
+  statut: BackendSeanceStatus;
+  code_couleur?: string;
+  nom_classe: string;
+  nom_matiere: string;
+  prof_prenom?: string;
+  prof_nom?: string;
+};
+
+type ApiCours = {
+  id_cours: number;
+  id_classe: number;
+  nom_matiere: string;
+  nom_classe: string;
+};
+
+type ApiClasse = {
+  id_classe: number;
+  nom_classe: string;
+  niveau: string;
+  nom_filiere?: string;
+};
+
+type SessionUI = {
+  id: string;
+  classId: string;
+  day: (typeof DAYS)[number];
+  startTime: string;
+  endTime: string;
+  subject: string;
+  room: string;
+  status: "normal" | "cancelled" | "postponed" | "makeup" | "replaced";
+  teacherName: string;
+  replacementTeacherId?: string;
+  postponedTo?: string;
+  originalSessionId?: string;
+};
+
+type ApiEnseignant = {
+  id_enseignant: number;
+  prenom: string;
+  nom: string;
+  email: string;
+};
+
+const toUIStatus = (s: BackendSeanceStatus): SessionUI["status"] => {
+  switch (s) {
+    case "annulee":
+      return "cancelled";
+    case "reportee":
+      return "postponed";
+    case "rattrapage":
+      return "makeup";
+    case "remplacee":
+      return "replaced";
+    case "prevue":
+    default:
+      return "normal";
+  }
+};
+
+const toBackendStatus = (s: SessionUI["status"]): BackendSeanceStatus => {
+  switch (s) {
+    case "cancelled":
+      return "annulee";
+    case "postponed":
+      return "reportee";
+    case "makeup":
+      return "rattrapage";
+    case "replaced":
+      return "remplacee";
+    case "normal":
+    default:
+      return "prevue";
+  }
+};
+
+const getDayKey = (isoDate: string): SessionUI["day"] => {
+  const d = new Date(isoDate);
+  const js = d.getDay();
+  if (js === 1) return "monday";
+  if (js === 2) return "tuesday";
+  if (js === 3) return "wednesday";
+  if (js === 4) return "thursday";
+  return "friday";
+};
+
+const dayPrefix = (day: SessionUI["day"]) => {
+  switch (day) {
+    case "monday":
+      return "LUN";
+    case "tuesday":
+      return "MAR";
+    case "wednesday":
+      return "MER";
+    case "thursday":
+      return "JEU";
+    case "friday":
+    default:
+      return "VEN";
+  }
+};
+
+const buildCreneauId = (
+  day: SessionUI["day"],
+  startTime: string,
+  endTime: string
+) => {
+  const sh = startTime.slice(0, 2);
+  const eh = endTime.slice(0, 2);
+  return `${dayPrefix(day)}_${sh}_${eh}`;
+};
+
 export default function ScheduleManagement() {
-  const [selectedClass, setSelectedClass] = useState<string>(
-    classes[0]?.id || ""
-  );
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [sessionList, setSessionList] = useState<Session[]>(sessions);
+  const token = localStorage.getItem("token");
+
+  // DATA
+  const [classes, setClasses] = useState<ApiClasse[]>([]);
+  const [cours, setCours] = useState<ApiCours[]>([]);
+  const [enseignants, setEnseignants] = useState<ApiEnseignant[]>([]);
+  const [sessionList, setSessionList] = useState<SessionUI[]>([]);
+
+  // FILTERS/UI
+  const [selectedClass, setSelectedClass] = useState<string>("");
   const [selectedLevel, setSelectedLevel] = useState<string>("");
   const [selectedField, setSelectedField] = useState<string>("");
   const [weekDate, setWeekDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
-  const [editingSession, setEditingSession] = useState<Session | null>(null);
 
-  const classSessions = sessionList.filter((s) => s.classId === selectedClass);
-  const selectedClassData = classes.find((c) => c.id === selectedClass);
+  // DIALOG ADD
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [addRoom, setAddRoom] = useState("");
+  const [addStart, setAddStart] = useState("08:00");
+  const [addEnd, setAddEnd] = useState("10:00");
+  const [addCoursId, setAddCoursId] = useState<string>("");
+  const [addTeacherId, setAddTeacherId] = useState<string>("__auto");
+  const [addDate, setAddDate] = useState<string>(
+    () => new Date().toISOString().split("T")[0]
+  );
 
-  const handleAddSession = () => {
-    toast.success("Séance ajoutée avec succès");
-    setIsAddDialogOpen(false);
-  };
+  // ⭐ Protection double soumission
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleUpdateSession = (updated: Session) => {
-    setSessionList((prev) =>
-      prev.map((s) => (s.id === updated.id ? updated : s))
+  // EDIT
+  const [editingSession, setEditingSession] = useState<SessionUI | null>(null);
+
+  const selectedClassData = useMemo(
+    () => classes.find((c) => String(c.id_classe) === selectedClass),
+    [classes, selectedClass]
+  );
+
+  const levels = useMemo(
+    () => Array.from(new Set(classes.map((c) => c.niveau))),
+    [classes]
+  );
+
+  const fields = useMemo(
+    () =>
+      Array.from(
+        new Set(classes.map((c) => c.nom_filiere).filter(Boolean) as string[])
+      ),
+    [classes]
+  );
+
+  const filteredClasses = useMemo(() => {
+    return classes.filter(
+      (c) =>
+        (selectedLevel ? c.niveau === selectedLevel : true) &&
+        (selectedField ? c.nom_filiere === selectedField : true)
     );
-    setEditingSession(null);
-    toast.success("Séance mise à jour");
-  };
+  }, [classes, selectedLevel, selectedField]);
+
+  const classSessions = useMemo(
+    () => sessionList.filter((s) => s.classId === selectedClass),
+    [sessionList, selectedClass]
+  );
 
   const adjustWeek = (delta: number) => {
     const d = new Date(weekDate);
@@ -98,19 +253,313 @@ export default function ScheduleManagement() {
     setWeekDate(d.toISOString().split("T")[0]);
   };
 
-  const levels = Array.from(new Set(classes.map((c) => c.level)));
-  const fields = Array.from(new Set(classes.map((c) => c.field)));
-
-  const filteredClasses = classes.filter(
-    (c) =>
-      (selectedLevel ? c.level === selectedLevel : true) &&
-      (selectedField ? c.field === selectedField : true)
-  );
+  const weekRange = useMemo(() => {
+    const base = new Date(weekDate);
+    const day = base.getDay();
+    const diffToMonday = (day === 0 ? -6 : 1) - day;
+    const monday = new Date(base);
+    monday.setDate(base.getDate() + diffToMonday);
+    const friday = new Date(monday);
+    friday.setDate(monday.getDate() + 4);
+    const toIso = (x: Date) => x.toISOString().split("T")[0];
+    return { monday: toIso(monday), friday: toIso(friday) };
+  }, [weekDate]);
 
   const getSessionsByDay = (day: string) => {
     return classSessions
       .filter((s) => s.day === day)
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  };
+
+  const coursForSelectedClass = useMemo(() => {
+    if (!selectedClass) return [];
+    return cours.filter((c) => String(c.id_classe) === String(selectedClass));
+  }, [cours, selectedClass]);
+
+  useEffect(() => {
+    setAddCoursId("");
+    setAddTeacherId("__auto");
+  }, [selectedClass]);
+
+  // ===== FETCH CLASSES + COURS + ENSEIGNANTS =====
+  useEffect(() => {
+    const loadBase = async () => {
+      try {
+        const [rClasses, rCours, rTeachers] = await Promise.all([
+          axios.get(`${API_URL}/classes`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          axios.get(`${API_URL}/cours`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          axios.get(`${API_URL}/enseignants`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+        ]);
+
+        if (rClasses.data?.success) {
+          const cls = rClasses.data.data || [];
+          setClasses(cls);
+          const first = cls[0];
+          if (first && !selectedClass)
+            setSelectedClass(String(first.id_classe));
+        } else {
+          toast.error("Erreur chargement classes");
+        }
+
+        if (rCours.data?.success) {
+          const mapped: ApiCours[] = (rCours.data.data || []).map((c: any) => ({
+            id_cours: c.id_cours,
+            id_classe: c.id_classe,
+            nom_matiere: c.nom_matiere,
+            nom_classe: c.nom_classe,
+          }));
+          setCours(mapped);
+        } else {
+          toast.error("Erreur chargement matières/cours");
+        }
+
+        if (rTeachers.data?.success) {
+          setEnseignants(rTeachers.data.data || []);
+        } else {
+          toast.error("Erreur chargement enseignants");
+        }
+      } catch (e: any) {
+        console.error(e);
+        toast.error(e?.response?.data?.message || "Erreur serveur (base)");
+      }
+    };
+
+    loadBase();
+  }, []);
+
+  // ===== FETCH SESSIONS (par classe) =====
+  useEffect(() => {
+    const loadSessions = async () => {
+      if (!selectedClass) return;
+      try {
+        console.log("📊 Chargement séances pour classe:", selectedClass);
+
+        const res = await axios.get(
+          `${API_URL}/emploi-temps/classe/${selectedClass}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (!res.data?.success) {
+          toast.error("Erreur chargement emploi du temps");
+          setSessionList([]);
+          return;
+        }
+
+        const all: ApiSeanceClasse[] = res.data.data || [];
+
+        console.log("📊 Total séances reçues:", all.length);
+        console.log("📅 Semaine actuelle:", weekRange);
+
+        const filtered = all.filter((s) => {
+          const d = s.date_seance.split("T")[0];
+          return d >= weekRange.monday && d <= weekRange.friday;
+        });
+
+        console.log("📋 Séances filtrées:", filtered.length);
+
+        const mapped: SessionUI[] = filtered.map((s) => ({
+          id: String(s.id_seance),
+          classId: String(selectedClass),
+          day: getDayKey(s.date_seance),
+          startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
+          endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
+          subject: s.nom_matiere,
+          room: `Room ${s.id_salle}`,
+          status: toUIStatus(s.statut),
+          teacherName:
+            `${s.prof_prenom || ""} ${s.prof_nom || ""}`.trim() || "N/A",
+        }));
+
+        setSessionList(mapped);
+      } catch (e: any) {
+        console.error(e);
+        toast.error(
+          e?.response?.data?.message ||
+            "Erreur serveur (emploi du temps classe)"
+        );
+        setSessionList([]);
+      }
+    };
+
+    loadSessions();
+  }, [selectedClass, token, weekRange]);
+
+  // ⭐ FONCTION DE RECHARGEMENT
+  const reloadSessionsForClass = async () => {
+    if (!selectedClass) return;
+
+    try {
+      console.log("🔄 Rechargement séances...");
+
+      const reload = await axios.get(
+        `${API_URL}/emploi-temps/classe/${selectedClass}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (!reload.data?.success) return;
+
+      const all: ApiSeanceClasse[] = reload.data.data || [];
+
+      console.log("📊 Après rechargement:", all.length, "séances");
+
+      const filtered = all.filter((s) => {
+        const d = s.date_seance.split("T")[0];
+        return d >= weekRange.monday && d <= weekRange.friday;
+      });
+
+      console.log("📋 Filtrées:", filtered.length);
+
+      setSessionList(
+        filtered.map((s) => ({
+          id: String(s.id_seance),
+          classId: String(selectedClass),
+          day: getDayKey(s.date_seance),
+          startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
+          endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
+          subject: s.nom_matiere,
+          room: `Room ${s.id_salle}`,
+          status: toUIStatus(s.statut),
+          teacherName:
+            `${s.prof_prenom || ""} ${s.prof_nom || ""}`.trim() || "N/A",
+        }))
+      );
+    } catch (e: any) {
+      console.error("❌ Erreur rechargement:", e);
+    }
+  };
+
+  // ⭐ ADD SESSION FINAL
+  const handleAddSession = async () => {
+    if (isSubmitting) {
+      console.log("⚠️ Déjà en cours");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      console.log("🚀 Ajout séance...");
+
+      if (!selectedClass) {
+        toast.error("Aucune classe sélectionnée");
+        return;
+      }
+
+      if (!addCoursId) {
+        toast.error("Sélectionne une matière");
+        return;
+      }
+
+      const id_salle = Number(addRoom.replace(/[^\d]/g, ""));
+      if (!id_salle) {
+        toast.error("Salle invalide (ex: 201)");
+        return;
+      }
+
+      if (!addDate) {
+        toast.error("Sélectionne une date");
+        return;
+      }
+
+      const dayKey = getDayKey(addDate);
+      const id_creneau = buildCreneauId(dayKey, addStart, addEnd);
+
+      const payload: any = {
+        id_cours: Number(addCoursId),
+        date_seance: addDate,
+        heure_debut: addStart,
+        heure_fin: addEnd,
+        id_salle,
+        id_creneau,
+      };
+
+      if (addTeacherId !== "__auto") {
+        payload.id_enseignant_effectif = Number(addTeacherId);
+      }
+
+      console.log("📤 Payload:", payload);
+
+      const res = await axios.post(`${API_URL}/emploi-temps/seances`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log("📥 Réponse:", res.data);
+
+      if (!res.data?.success) {
+        toast.error(res.data?.message || "Erreur ajout séance");
+        return;
+      }
+
+      toast.success("✅ Séance ajoutée !");
+
+      setIsAddDialogOpen(false);
+
+      // Reset
+      setAddCoursId("");
+      setAddTeacherId("__auto");
+      setAddRoom("");
+      setAddStart("08:00");
+      setAddEnd("10:00");
+
+      // Changer de semaine si nécessaire
+      setWeekDate(addDate);
+
+      // Attendre puis recharger
+      setTimeout(async () => {
+        await reloadSessionsForClass();
+      }, 300);
+    } catch (e: any) {
+      console.error("❌ Erreur:", e);
+      toast.error(e?.response?.data?.message || "Erreur serveur");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ===== UPDATE STATUS =====
+  const handleUpdateSession = async (updated: SessionUI) => {
+    try {
+      const statut = toBackendStatus(updated.status);
+
+      const payload: any = { statut };
+
+      if (statut === "remplacee" && updated.replacementTeacherId) {
+        payload.id_enseignant_remplacant = Number(updated.replacementTeacherId);
+      }
+
+      if (statut === "reportee" && updated.postponedTo) {
+        payload.date_report = updated.postponedTo;
+      }
+
+      const res = await axios.put(
+        `${API_URL}/emploi-temps/seances/${updated.id}/statut`,
+        payload,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (!res.data?.success) {
+        toast.error(res.data?.message || "Erreur mise à jour");
+        return;
+      }
+
+      setEditingSession(null);
+      toast.success("Séance mise à jour");
+      await reloadSessionsForClass();
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.response?.data?.message || "Erreur serveur");
+    }
   };
 
   return (
@@ -129,39 +578,68 @@ export default function ScheduleManagement() {
           onOpenChange={setIsAddDialogOpen}
         >
           <DialogTrigger asChild>
-            <Button className='gap-2'>
+            <Button
+              className='gap-2'
+              disabled={isSubmitting}
+            >
               <Plus className='h-4 w-4' />
               Ajouter une séance
             </Button>
           </DialogTrigger>
+
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Ajouter une séance</DialogTitle>
               <DialogDescription>
-                Créer une nouvelle séance dans l'emploi du temps
+                Créer une nouvelle séance pour la classe :{" "}
+                {selectedClassData?.nom_classe}
               </DialogDescription>
             </DialogHeader>
 
             <div className='space-y-4 py-4'>
               <div className='space-y-2'>
-                <Label>Matière</Label>
-                <Input placeholder='Mathématiques' />
+                <Label>Matière *</Label>
+                <Select
+                  value={addCoursId}
+                  onValueChange={setAddCoursId}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder='Sélectionner une matière' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {coursForSelectedClass.map((c) => (
+                      <SelectItem
+                        key={c.id_cours}
+                        value={String(c.id_cours)}
+                      >
+                        {c.nom_matiere}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className='space-y-2'>
                 <Label>Professeur</Label>
-                <Select>
+                <Select
+                  value={addTeacherId}
+                  onValueChange={setAddTeacherId}
+                  disabled={isSubmitting}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder='Sélectionner un professeur' />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {teachers.map((teacher) => (
+                    <SelectItem value='__auto'>
+                      Auto (titulaire du cours)
+                    </SelectItem>
+                    {enseignants.map((t) => (
                       <SelectItem
-                        key={teacher.id}
-                        value={teacher.id}
+                        key={t.id_enseignant}
+                        value={String(t.id_enseignant)}
                       >
-                        {teacher.firstName} {teacher.lastName} (
-                        {teacher.subjects.join(", ")})
+                        {t.prenom} {t.nom}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -170,44 +648,44 @@ export default function ScheduleManagement() {
 
               <div className='grid grid-cols-2 gap-4'>
                 <div className='space-y-2'>
-                  <Label>Jour</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder='Jour' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DAYS.map((day) => (
-                        <SelectItem
-                          key={day}
-                          value={day}
-                        >
-                          {DAY_LABELS[day]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Date *</Label>
+                  <Input
+                    type='date'
+                    value={addDate}
+                    onChange={(e) => setAddDate(e.target.value)}
+                    disabled={isSubmitting}
+                  />
                 </div>
 
                 <div className='space-y-2'>
-                  <Label>Salle</Label>
-                  <Input placeholder='Room 201' />
+                  <Label>Salle * (numéro)</Label>
+                  <Input
+                    placeholder='201'
+                    value={addRoom}
+                    onChange={(e) => setAddRoom(e.target.value)}
+                    disabled={isSubmitting}
+                  />
                 </div>
               </div>
 
               <div className='grid grid-cols-2 gap-4'>
                 <div className='space-y-2'>
-                  <Label>Heure début</Label>
+                  <Label>Heure début *</Label>
                   <Input
                     type='time'
-                    defaultValue='08:00'
+                    value={addStart}
+                    onChange={(e) => setAddStart(e.target.value)}
+                    disabled={isSubmitting}
                   />
                 </div>
 
                 <div className='space-y-2'>
-                  <Label>Heure fin</Label>
+                  <Label>Heure fin *</Label>
                   <Input
                     type='time'
-                    defaultValue='10:00'
+                    value={addEnd}
+                    onChange={(e) => setAddEnd(e.target.value)}
+                    disabled={isSubmitting}
                   />
                 </div>
               </div>
@@ -217,10 +695,19 @@ export default function ScheduleManagement() {
               <Button
                 variant='outline'
                 onClick={() => setIsAddDialogOpen(false)}
+                disabled={isSubmitting}
               >
                 Annuler
               </Button>
-              <Button onClick={handleAddSession}>Ajouter</Button>
+              <Button
+                onClick={handleAddSession}
+                disabled={isSubmitting}
+              >
+                {isSubmitting && (
+                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                )}
+                {isSubmitting ? "Ajout..." : "Ajouter"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -251,6 +738,7 @@ export default function ScheduleManagement() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className='flex items-center gap-2'>
               <Label>Filière:</Label>
               <Select
@@ -272,6 +760,7 @@ export default function ScheduleManagement() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className='flex items-center gap-2'>
               <Label>Classe:</Label>
               <Select
@@ -284,20 +773,22 @@ export default function ScheduleManagement() {
                 <SelectContent>
                   {filteredClasses.map((cls) => (
                     <SelectItem
-                      key={cls.id}
-                      value={cls.id}
+                      key={cls.id_classe}
+                      value={String(cls.id_classe)}
                     >
-                      {cls.name}
+                      {cls.nom_classe}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+
               {selectedClassData && (
                 <Badge variant='secondary'>
-                  {selectedClassData.studentIds.length} étudiants
+                  ✓ {selectedClassData.nom_classe}
                 </Badge>
               )}
             </div>
+
             <div className='flex items-center gap-2'>
               <Label>Semaine:</Label>
               <Button
@@ -356,6 +847,7 @@ export default function ScheduleManagement() {
         </CardContent>
       </Card>
 
+      {/* Edit Dialog */}
       {editingSession && (
         <Dialog
           open={!!editingSession}
@@ -368,6 +860,7 @@ export default function ScheduleManagement() {
                 Mettre à jour le statut et les détails
               </DialogDescription>
             </DialogHeader>
+
             <div className='space-y-4 py-2'>
               <div className='grid grid-cols-2 gap-4'>
                 <div className='space-y-2'>
@@ -406,6 +899,7 @@ export default function ScheduleManagement() {
                     </SelectContent>
                   </Select>
                 </div>
+
                 <div className='space-y-2'>
                   <Label>Salle</Label>
                   <Input
@@ -451,48 +945,17 @@ export default function ScheduleManagement() {
 
               {editingSession.status === "replaced" && (
                 <div className='space-y-2'>
-                  <Label>Professeur remplaçant</Label>
-                  <Select
+                  <Label>Professeur remplaçant (ID)</Label>
+                  <Input
+                    placeholder='ex: 5'
                     value={editingSession.replacementTeacherId || ""}
-                    onValueChange={(val) =>
+                    onChange={(e) =>
                       setEditingSession({
                         ...editingSession,
-                        replacementTeacherId: val,
+                        replacementTeacherId: e.target.value,
                       })
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder='Sélectionner un remplaçant' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teachers
-                        .filter(
-                          (t) =>
-                            t.subjects.includes(editingSession.subject) &&
-                            t.id !== editingSession.teacherId
-                        )
-                        .map((t) => (
-                          <SelectItem
-                            key={t.id}
-                            value={t.id}
-                          >
-                            {t.firstName} {t.lastName} ({t.subjects.join(", ")})
-                          </SelectItem>
-                        ))}
-                      {teachers
-                        .filter(
-                          (t) => !t.subjects.includes(editingSession.subject)
-                        )
-                        .map((t) => (
-                          <SelectItem
-                            key={t.id}
-                            value={t.id}
-                          >
-                            {t.firstName} {t.lastName}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
               )}
 
@@ -547,6 +1010,7 @@ export default function ScheduleManagement() {
                 </div>
               )}
             </div>
+
             <DialogFooter>
               <Button
                 variant='outline'
@@ -554,11 +1018,9 @@ export default function ScheduleManagement() {
               >
                 Annuler
               </Button>
-              {editingSession && (
-                <Button onClick={() => handleUpdateSession(editingSession)}>
-                  Enregistrer
-                </Button>
-              )}
+              <Button onClick={() => handleUpdateSession(editingSession)}>
+                Enregistrer
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -568,7 +1030,7 @@ export default function ScheduleManagement() {
       <Card>
         <CardHeader>
           <CardTitle>Emploi du temps de la semaine</CardTitle>
-          <CardDescription>{selectedClassData?.name}</CardDescription>
+          <CardDescription>{selectedClassData?.nom_classe}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className='grid grid-cols-1 md:grid-cols-5 gap-4'>
@@ -588,71 +1050,50 @@ export default function ScheduleManagement() {
                   </div>
 
                   <div className='space-y-2'>
-                    {daySessions.map((session) => {
-                      const teacher = teachers.find(
-                        (t) => t.id === session.teacherId
-                      );
-                      const replacementTeacher = session.replacementTeacherId
-                        ? teachers.find(
-                            (t) => t.id === session.replacementTeacherId
-                          )
-                        : null;
-
-                      return (
-                        <div
-                          key={session.id}
-                          className={`p-3 rounded-lg border-2 ${
-                            STATUS_COLORS[session.status]
-                          } hover:shadow-md transition-shadow cursor-pointer`}
-                          onClick={() => setEditingSession(session)}
-                        >
-                          <div className='flex items-start justify-between mb-2'>
-                            <div className='text-sm text-indigo-700'>
-                              {session.startTime} - {session.endTime}
-                            </div>
-                            {session.status !== "normal" && (
-                              <Badge
-                                variant='outline'
-                                className='text-xs'
-                              >
-                                {STATUS_LABELS[session.status]}
-                              </Badge>
-                            )}
+                    {daySessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className={`p-3 rounded-lg border-2 ${
+                          STATUS_COLORS[session.status]
+                        } hover:shadow-md transition-shadow cursor-pointer`}
+                        onClick={() => setEditingSession(session)}
+                      >
+                        <div className='flex items-start justify-between mb-2'>
+                          <div className='text-sm text-indigo-700'>
+                            {session.startTime} - {session.endTime}
                           </div>
-
-                          <div>
-                            <p>{session.subject}</p>
-                            <p className='text-xs text-gray-600 mt-1'>
-                              {replacementTeacher
-                                ? `${replacementTeacher.firstName} ${replacementTeacher.lastName}`
-                                : teacher
-                                ? `${teacher.firstName} ${teacher.lastName}`
-                                : "N/A"}
-                            </p>
-                            {replacementTeacher && (
-                              <p className='text-xs text-blue-600 mt-1'>
-                                Remplaçant: {replacementTeacher.firstName}{" "}
-                                {replacementTeacher.lastName}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className='flex items-center gap-1 mt-2 text-xs text-gray-500'>
-                            <MapPin className='h-3 w-3' />
-                            {session.room}
-                          </div>
-
-                          {session.postponedTo && (
-                            <p className='text-xs text-green-600 mt-2'>
-                              Reportée au{" "}
-                              {new Date(session.postponedTo).toLocaleDateString(
-                                "fr-FR"
-                              )}
-                            </p>
+                          {session.status !== "normal" && (
+                            <Badge
+                              variant='outline'
+                              className='text-xs'
+                            >
+                              {STATUS_LABELS[session.status]}
+                            </Badge>
                           )}
                         </div>
-                      );
-                    })}
+
+                        <div>
+                          <p className='font-medium'>{session.subject}</p>
+                          <p className='text-xs text-gray-600 mt-1'>
+                            {session.teacherName}
+                          </p>
+                        </div>
+
+                        <div className='flex items-center gap-1 mt-2 text-xs text-gray-500'>
+                          <MapPin className='h-3 w-3' />
+                          {session.room}
+                        </div>
+
+                        {session.postponedTo && (
+                          <p className='text-xs text-green-600 mt-2'>
+                            Reportée au{" "}
+                            {new Date(session.postponedTo).toLocaleDateString(
+                              "fr-FR"
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    ))}
 
                     {daySessions.length === 0 && (
                       <div className='text-center py-8 text-gray-400 text-sm'>
