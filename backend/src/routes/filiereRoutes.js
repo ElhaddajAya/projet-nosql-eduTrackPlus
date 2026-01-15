@@ -4,6 +4,6 @@ const router = express.Router();
 import { getAllFilieres } from "../controllers/filiereController.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 
-router.get("/", authenticate, authorize(["admin"]), getAllFilieres);
+router.get("/", authenticate, authorize(["admin", "teacher"]), getAllFilieres);
 
 export default router;
