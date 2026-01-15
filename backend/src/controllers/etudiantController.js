@@ -485,12 +485,12 @@ export const getMyProfile = async (req, res) =>
         console.log('🔍 GET /me appelé');
         console.log('📋 req.user:', req.user);
 
-        // req.user est défini par le middleware authenticate
-        const id_utilisateur = req.user?.id_utilisateur;
+        // ⭐ FIX : Le JWT peut contenir soit "id" soit "id_utilisateur"
+        const id_utilisateur = req.user?.id_utilisateur || req.user?.id;
 
         if (!id_utilisateur)
         {
-            console.error('❌ Pas de id_utilisateur dans req.user');
+            console.error('❌ Pas de id_utilisateur ou id dans req.user');
             return res.status(401).json({
                 success: false,
                 message: 'Non authentifié'
