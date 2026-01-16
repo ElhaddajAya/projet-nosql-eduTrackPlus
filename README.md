@@ -4,7 +4,8 @@ EduTrackPlus is a **full‑stack educational platform** designed to manage **att
 
 This project was developed as part of a **NoSQL / Web Engineering academic project**.
 
-**Link :** 
+**Link :** [https://github.com/ElhaddajAya/projet-nosql-eduTrackPlus.git
+](https://github.com/ElhaddajAya/projet-nosql-eduTrackPlus.git)
 
 ---
 
@@ -38,10 +39,10 @@ This project was developed as part of a **NoSQL / Web Engineering academic proje
 
 EduTrackPlus uses **4 databases**, each for a specific responsibility:
 
-| Database          | Type       | Role                          |
-| ----------------- | ---------- | ----------------------------- |
+| Database    | Type       | Role                          |
+| ----------- | ---------- | ----------------------------- |
 | **MySQL**   | Relational | Core academic data            |
-| **Redis**   | Key–Value | Streaks & leaderboard         |
+| **Redis**   | Key–Value  | Streaks & leaderboard         |
 | **MongoDB** | Document   | Notifications & presence logs |
 | **Neo4j**   | Graph      | Schedule & replacements logic |
 
@@ -93,7 +94,7 @@ EduTrackPlus uses **4 databases**, each for a specific responsibility:
 
 1. Teacher declares absence
 2. Admin notified → **MongoDB**
-3. Sessions marked *cancelled* → **MySQL**
+3. Sessions marked _cancelled_ → **MySQL**
 4. Available teachers searched → **Neo4j**
 5. Admin validates replacement
 6. Session updated → **MySQL**
