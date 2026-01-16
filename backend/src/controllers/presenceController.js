@@ -447,6 +447,7 @@ export const getLeaderboard = async (req, res) =>
 {
     try
     {
+        // Récupérer les 10 meilleurs etudiants avec leur streak
         const top = await redisClient.zRangeWithScores("leaderboard:streaks", 0, 9, { REV: true });
         return res.json({ success: true, data: top });
     } catch (error)
@@ -462,6 +463,7 @@ export const getStreak = async (req, res) =>
 {
     try
     {
+        // Récupérer le streak de l'etudiant avec id
         const { id } = req.params;
         const streak = await redisClient.get(`streak:${id}`);
         return res.json({ success: true, data: { id_etudiant: id, streak: parseInt(streak || "0", 10) } });
