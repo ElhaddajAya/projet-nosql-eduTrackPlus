@@ -263,6 +263,7 @@ export const marquerPresencesMasse = async (req, res) =>
         const errors = [];
         const successes = [];
 
+        // Pour chaque présence (etudiant) on insere la presence + on gère le streak
         for (const p of presences)
         {
             const { id_etudiant, statut } = p;
@@ -274,7 +275,7 @@ export const marquerPresencesMasse = async (req, res) =>
 
             try
             {
-                // ✅ réutilise la logique individuelle (upsert + streak)
+                // réutilise la logique individuelle (upsert + streak)
                 // (petit hack propre : on appelle la même fonction mais sans res/req express)
                 // Ici, on duplique juste l'essentiel pour éviter complications Express.
 

@@ -177,7 +177,7 @@ export const accepterRemplacement = async (req, res) =>
 
                 // 2. Création des relations
                 console.log('📝 Création des relations...');
-                // Requete : CREER LES RELATIONS REPLACES ET TEACHES_TEMP
+                // Requete : CREER LES RELATIONS 'REPLACES' ET 'TEACHES_TEMP'
                 const result = await tx.run(
                     `
                     MATCH (remplacant:Enseignant {id_enseignant: $remplacantId})
@@ -224,6 +224,7 @@ export const accepterRemplacement = async (req, res) =>
         }
 
         // 6. Notifications
+        // Notifier le remplaçant 
         await Notification.create({
             id_utilisateur: id_enseignant_remplacant,
             type: 'remplacement',
@@ -231,7 +232,7 @@ export const accepterRemplacement = async (req, res) =>
             message: `Vous avez été assigné comme remplaçant pour la séance ${demandeData.id_seance}`,
             metadata: { id_seance: demandeData.id_seance }
         });
-
+        // Notifier l'enseignant absent
         await Notification.create({
             id_utilisateur: demandeData.id_enseignant_absent,
             type: 'remplacement',
