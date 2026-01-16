@@ -6,13 +6,14 @@ import
     demanderRemplacement,
     getEnseignantsDisponibles,
     accepterRemplacement,
-    getRemplacementsEnAttente
+    getRemplacementsEnAttente,
+    getHistoriqueAbsences
 } from '../controllers/remplacementController.js';
 
 import { authenticate, authorize } from '../middleware/auth.js';
 
 /**
- * 1️⃣ Déclaration d’absence (enseignante ou admin)
+ * 1️⃣ Déclaration d'absence (enseignant ou admin)
  * POST /api/remplacements/demander
  */
 router.post(
@@ -53,6 +54,17 @@ router.get(
     authenticate,
     authorize(['admin']),
     getRemplacementsEnAttente
+);
+
+/**
+ * 5️⃣ ⭐ NOUVEAU : Historique des absences d'un enseignant
+ * GET /api/remplacements/historique/:id_enseignant
+ */
+router.get(
+    '/historique/:id_enseignant',
+    authenticate,
+    authorize(['teacher', 'admin']),
+    getHistoriqueAbsences
 );
 
 export default router;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Users,
   BookOpen,
@@ -12,12 +12,17 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Avatar, AvatarFallback } from "../ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import UserManagement from "./UserManagement";
 import ClassManagement from "./ClassManagement";
 import ScheduleManagement from "./ScheduleManagement";
 import StatisticsDashboard from "./StatisticsDashboard";
 import AlertConfiguration from "./AlertConfiguration";
+import ReplacementNotifications from "./ReplacementNotifications";
 import { User } from "../../types";
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 interface AdminDashboardProps {
   user: User;
@@ -28,7 +33,47 @@ export default function AdminDashboard({
   user,
   onLogout,
 }: AdminDashboardProps) {
+  const token = localStorage.getItem("token");
   const [activeTab, setActiveTab] = useState("dashboard");
+
+  // ⭐ NOUVEAU : Notifications
+  const [notifDialogOpen, setNotifDialogOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // ⭐ Charger nombre de demandes en attente
+  useEffect(() => {
+    const loadPendingCount = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/remplacements/en-attente`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.data?.success) {
+          const aujourdhui = new Date().toISOString().split("T")[0];
+          const aujourdhuiDemandes = (res.data.data || []).filter((d: any) => {
+            const dateSeance = d.date_seance.split("T")[0];
+            return dateSeance === aujourdhui;
+          });
+          setPendingCount(aujourdhuiDemandes.length);
+        }
+      } catch (error) {
+        console.error("Erreur chargement notifications:", error);
+      }
+    };
+
+    loadPendingCount();
+
+    // Refresh toutes les 30 secondes
+    const interval = setInterval(loadPendingCount, 30000);
+    return () => clearInterval(interval);
+  }, [token]);
+
+  // ⭐ Handler pour redirection vers emploi du temps
+  const handleViewSchedule = (seanceId: number) => {
+    setNotifDialogOpen(false);
+    setActiveTab("schedules");
+    // TODO: Scroll vers la séance concernée si besoin
+  };
 
   return (
     <div className='min-h-screen bg-gray-50'>
@@ -40,19 +85,25 @@ export default function AdminDashboard({
               <GraduationCap className='h-6 w-6 text-white' />
             </div>
             <div>
-              <h1 className='text-xl'>EduManager</h1>
-              <p className='text-sm text-gray-500'>Mon Espace Étudiant</p>
+              <h1 className='text-xl'>EduTrackPlus</h1>
+              <p className='text-sm text-gray-500'>Administration</p>
             </div>
           </div>
 
           <div className='flex items-center gap-4'>
+            {/* ⭐ BADGE NOTIFICATION */}
             <Button
               variant='ghost'
               size='icon'
               className='relative'
+              onClick={() => setNotifDialogOpen(true)}
             >
               <Bell className='h-5 w-5' />
-              <span className='absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full'></span>
+              {pendingCount > 0 && (
+                <span className='absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full flex items-center justify-center text-xs text-white font-bold'>
+                  {pendingCount}
+                </span>
+              )}
             </Button>
 
             <div className='flex items-center gap-3'>
@@ -81,8 +132,50 @@ export default function AdminDashboard({
         </div>
       </header>
 
+      {/* ⭐ DIALOG NOTIFICATIONS */}
+      <Dialog
+        open={notifDialogOpen}
+        onOpenChange={setNotifDialogOpen}
+      >
+        <DialogContent className='max-w-3xl max-h-[80vh] overflow-y-auto'>
+          <DialogHeader>
+            <DialogTitle>Demandes de Remplacement</DialogTitle>
+          </DialogHeader>
+          <ReplacementNotifications
+            onClose={() => setNotifDialogOpen(false)}
+            onViewSchedule={handleViewSchedule}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Main Content */}
       <div className='p-6'>
+        {/* ⭐ ALERTE SI DEMANDES EN ATTENTE */}
+        {pendingCount > 0 && (
+          <div className='mb-6 bg-orange-100 border-2 border-orange-300 rounded-lg p-4'>
+            <div className='flex items-center justify-between'>
+              <div className='flex items-center gap-3'>
+                <Bell className='h-6 w-6 text-orange-600' />
+                <div>
+                  <p className='font-semibold text-orange-900'>
+                    {pendingCount} demande(s) de remplacement aujourd'hui
+                  </p>
+                  <p className='text-sm text-orange-700'>
+                    Des enseignants ont déclaré leur absence. Cliquez pour
+                    assigner des remplaçants.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={() => setNotifDialogOpen(true)}
+                className='bg-orange-600 hover:bg-orange-700'
+              >
+                Voir les demandes
+              </Button>
+            </div>
+          </div>
+        )}
+
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
@@ -112,10 +205,15 @@ export default function AdminDashboard({
             </TabsTrigger>
             <TabsTrigger
               value='schedules'
-              className='gap-2'
+              className='gap-2 relative'
             >
               <Calendar className='h-4 w-4' />
               Emplois du temps
+              {pendingCount > 0 && (
+                <span className='absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-xs text-white flex items-center justify-center'>
+                  {pendingCount}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger
               value='alerts'
