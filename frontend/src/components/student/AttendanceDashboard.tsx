@@ -1,243 +1,406 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Progress } from '../ui/progress';
-import { TrendingUp, Calendar, Award, Flame, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { attendanceRecords, students } from '../../data/mockData';
-import { calculateAttendanceStats, getAttendanceRateWithBonus } from '../../utils/attendance';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { useEffect, useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../ui/card";
+import { Badge } from "../ui/badge";
+import { Progress } from "../ui/progress";
+import {
+  TrendingUp,
+  Award,
+  Calendar,
+  Target,
+  BookOpen,
+  Flame,
+  AlertCircle,
+  CheckCircle2,
+} from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import axios from "axios";
+import { toast } from "sonner";
 
 interface AttendanceDashboardProps {
   studentId: string;
 }
 
-export default function AttendanceDashboard({ studentId }: AttendanceDashboardProps) {
-  const student = students.find(s => s.id === studentId);
-  const studentRecords = attendanceRecords.filter(r => r.studentId === studentId);
-  const stats = calculateAttendanceStats(studentRecords);
-  const rateWithBonus = getAttendanceRateWithBonus(stats.attendanceRate, stats.streak);
-  const streakBonus = rateWithBonus - stats.attendanceRate;
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-  // Weekly attendance data (last 4 weeks)
-  const weeklyData = [
-    { week: 'Sem 1', taux: 95 },
-    { week: 'Sem 2', taux: 92 },
-    { week: 'Sem 3', taux: 94 },
-    { week: 'Sem 4', taux: Math.round(stats.attendanceRate) },
-  ];
+const COLORS = {
+  present: "#10b981",
+  absent: "#ef4444",
+  retard: "#f59e0b",
+};
 
-  // Status distribution
-  const pieData = [
-    { name: 'Présent', value: stats.presentDays, color: '#10b981' },
-    { name: 'Absent', value: stats.absentDays, color: '#ef4444' },
-    { name: 'En retard', value: stats.lateDays, color: '#f59e0b' },
-  ];
+export default function AttendanceDashboard({
+  studentId,
+}: AttendanceDashboardProps) {
+  const token = localStorage.getItem("token");
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<any>(null);
+  const [idEtudiant, setIdEtudiant] = useState<number | null>(null);
 
-  // Subject-wise attendance (mock data)
-  const subjectData = [
-    { subject: 'Math', taux: 96 },
-    { subject: 'Physique', taux: 94 },
-    { subject: 'Français', taux: 90 },
-    { subject: 'Anglais', taux: 98 },
-    { subject: 'Histoire', taux: 88 },
-  ];
+  useEffect(() => {
+    const fetchIdEtudiant = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/etudiants/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-  const nextStreakMilestone = Math.ceil(stats.streak / 5) * 5;
-  const progressToNextMilestone = ((stats.streak % 5) / 5) * 100;
+        if (res.data?.success) {
+          setIdEtudiant(res.data.data.id_etudiant);
+        } else {
+          toast.error("Profil étudiant non trouvé");
+        }
+      } catch (error: any) {
+        console.error("Erreur récupération id_etudiant:", error);
+        toast.error("Erreur chargement profil");
+      }
+    };
+
+    fetchIdEtudiant();
+  }, [token]);
+
+  useEffect(() => {
+    if (!idEtudiant) return;
+
+    const fetchStats = async () => {
+      try {
+        setLoading(true);
+
+        const res = await axios.get(
+          `${API_URL}/dashboard/student/${idEtudiant}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (!res.data?.success) {
+          toast.error("Erreur chargement statistiques");
+          return;
+        }
+
+        const data = res.data.data;
+
+        // Données pie chart
+        const pieData = [
+          {
+            name: "Présent",
+            value: data.presences?.presents || 0,
+            color: COLORS.present,
+          },
+          {
+            name: "Absent",
+            value: data.presences?.absents || 0,
+            color: COLORS.absent,
+          },
+          {
+            name: "Retard",
+            value: data.presences?.retards || 0,
+            color: COLORS.retard,
+          },
+        ];
+
+        // ⭐ Graphique taux par matière (NOUVEAU)
+        const chartMatiere = (data.coursLesPlusSuivis || []).map((c: any) => ({
+          matiere: c.nom_matiere,
+          taux:
+            c.total_presences > 0
+              ? parseFloat(((c.presents / c.total_presences) * 100).toFixed(1))
+              : 0,
+        }));
+
+        setStats({
+          ...data,
+          pieData,
+          chartMatiere,
+        });
+      } catch (error: any) {
+        console.error("Erreur fetch stats:", error);
+        toast.error("Erreur chargement statistiques");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, [idEtudiant, token]);
+
+  if (loading) {
+    return (
+      <div className='flex items-center justify-center h-96'>
+        <div className='text-center'>
+          <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto'></div>
+          <p className='mt-4 text-gray-500'>Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <div className='text-center py-12'>
+        <p className='text-gray-500'>Aucune donnée disponible</p>
+      </div>
+    );
+  }
+
+  const streak = stats.etudiant?.streak || 0;
+  const streakBonus = Math.floor(streak / 5);
+  const progressToNextBonus = ((streak % 5) / 5) * 100;
 
   return (
-    <div className="space-y-6">
-      {/* Welcome Message */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg p-6">
-        <h2 className="text-2xl mb-2">Bonjour, {student?.firstName}! 👋</h2>
-        <p className="opacity-90">
+    <div className='space-y-6'>
+      {/* Header */}
+      <div className='bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg p-6'>
+        <h2 className='text-2xl font-bold mb-2'>
+          Bonjour, {stats.etudiant?.nom} ! 👋
+        </h2>
+        <p className='opacity-90'>
           Continue comme ça! Ton taux de présence est excellent.
         </p>
       </div>
 
-      {/* Main Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-green-700">Taux de Présence</CardTitle>
+      {/* Stats Cards */}
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
+        <Card className='bg-gradient-to-br from-green-50 to-emerald-50 border-green-200'>
+          <CardHeader className='pb-3'>
+            <CardTitle className='text-sm text-green-700'>
+              Taux de Présence
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl text-green-600 mb-2">
-              {Math.round(rateWithBonus)}%
+            <div className='text-3xl font-bold text-green-600 mb-2'>
+              {stats.presences?.tauxPresence || 0}%
             </div>
-            {streakBonus > 0 && (
-              <Badge variant="secondary" className="bg-green-100 text-green-700">
-                +{streakBonus.toFixed(1)}% bonus 🎉
-              </Badge>
-            )}
-            <Progress value={rateWithBonus} className="mt-3" />
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-blue-700">Jours Présents</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl text-blue-600 mb-2">
-              {stats.presentDays}
-            </div>
-            <p className="text-xs text-gray-600">
-              sur {stats.totalDays} jours
+            <Progress
+              value={stats.presences?.tauxPresence || 0}
+              className='mt-2'
+            />
+            <p className='text-xs text-gray-600 mt-2'>
+              {stats.presences?.presents}/{stats.presences?.total} séances
             </p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-orange-50 to-red-50 border-orange-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-orange-700 flex items-center gap-2">
-              <Flame className="h-4 w-4" />
+        <Card className='bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200'>
+          <CardHeader className='pb-3'>
+            <CardTitle className='text-sm text-blue-700'>
+              Jours Présents
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className='text-3xl font-bold text-blue-600 mb-2'>
+              {stats.presences?.presents || 0}
+            </div>
+            <p className='text-xs text-gray-600'>
+              sur {stats.presences?.total || 0} jours
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className='bg-gradient-to-br from-orange-50 to-red-50 border-orange-200'>
+          <CardHeader className='pb-3'>
+            <CardTitle className='text-sm text-orange-700 flex items-center gap-2'>
+              <Flame className='h-4 w-4' />
               Série Actuelle
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl text-orange-600 mb-2">
-              {stats.streak} jours
+            <div className='text-3xl font-bold text-orange-600 mb-2'>
+              {streak} jours
             </div>
-            <p className="text-xs text-gray-600">
-              {5 - (stats.streak % 5)} jours pour +1%
+            <p className='text-xs text-gray-600'>
+              {5 - (streak % 5)} jours pour +1%
             </p>
-            <Progress value={progressToNextMilestone} className="mt-3" />
+            <Progress
+              value={progressToNextBonus}
+              className='mt-2'
+            />
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-purple-700 flex items-center gap-2">
-              <Award className="h-4 w-4" />
+        <Card className='bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200'>
+          <CardHeader className='pb-3'>
+            <CardTitle className='text-sm text-purple-700 flex items-center gap-2'>
+              <Award className='h-4 w-4' />
               Récompenses
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl text-purple-600 mb-2">
-              {Math.floor(stats.streak / 5)}
+            <div className='text-3xl font-bold text-purple-600 mb-2'>
+              {streakBonus}
             </div>
-            <p className="text-xs text-gray-600">
-              bonus gagnés
+            <p className='text-xs text-gray-600'>
+              bonus gagnés ({streakBonus}%)
             </p>
           </CardContent>
         </Card>
       </div>
 
       {/* Streak Explanation */}
-      <Card className="bg-gradient-to-r from-orange-50 to-yellow-50 border-orange-200">
+      <Card className='bg-gradient-to-r from-orange-50 to-yellow-50 border-orange-200'>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-orange-700">
-            <Flame className="h-5 w-5" />
+          <CardTitle className='flex items-center gap-2 text-orange-700'>
+            <Flame className='h-5 w-5' />
             Système de Séries (Streak)
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-gray-700">
-            Pour chaque <strong>5 jours consécutifs</strong> de présence, tu gagnes <strong>+1%</strong> à ton taux de présence! 🎯
+        <CardContent className='space-y-3'>
+          <p className='text-sm text-gray-700'>
+            Pour chaque <strong>5 jours consécutifs</strong> de présence, tu
+            gagnes <strong>+1%</strong> à ton taux de présence! 🎯
           </p>
-          <div className="flex items-center gap-4 bg-white p-4 rounded-lg border border-orange-200">
-            <div className="flex-1">
-              <p className="text-sm mb-2">Progrès vers le prochain bonus:</p>
-              <Progress value={progressToNextMilestone} className="h-3" />
+          <div className='flex items-center gap-4 bg-white p-4 rounded-lg border border-orange-200'>
+            <div className='flex-1'>
+              <p className='text-sm font-medium mb-2'>
+                Progrès vers le prochain bonus:
+              </p>
+              <Progress
+                value={progressToNextBonus}
+                className='h-3'
+              />
             </div>
-            <div className="text-center">
-              <div className="text-2xl text-orange-600">{stats.streak % 5}/5</div>
-              <p className="text-xs text-gray-500">jours</p>
+            <div className='text-center'>
+              <div className='text-2xl font-bold text-orange-600'>
+                {streak % 5}/5
+              </div>
+              <p className='text-xs text-gray-500'>jours</p>
             </div>
           </div>
-          {stats.streak >= 5 && (
-            <div className="bg-green-100 text-green-800 p-3 rounded-lg flex items-start gap-2">
-              <CheckCircle2 className="h-5 w-5 mt-0.5" />
-              <p className="text-sm">
-                Excellent! Tu as gagné {Math.floor(stats.streak / 5)} bonus. Continue sur cette lancée!
+          {streakBonus > 0 && (
+            <div className='bg-green-100 text-green-800 p-3 rounded-lg flex items-start gap-2'>
+              <CheckCircle2 className='h-5 w-5 mt-0.5' />
+              <p className='text-sm'>
+                Excellent! Tu as gagné {streakBonus} bonus. Continue sur cette
+                lancée!
               </p>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Graphiques */}
+      <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+        {/* ⭐ NOUVEAU : Taux par matière */}
         <Card>
           <CardHeader>
-            <CardTitle>Évolution Hebdomadaire</CardTitle>
-            <CardDescription>Ton taux de présence ces 4 dernières semaines</CardDescription>
+            <CardTitle className='flex items-center gap-2'>
+              <BookOpen className='h-5 w-5' />
+              Présence par Matière
+            </CardTitle>
+            <CardDescription>Ton assiduité dans chaque cours</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={weeklyData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="week" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Bar dataKey="taux" fill="#3b82f6" name="Taux %" />
-              </BarChart>
-            </ResponsiveContainer>
+            {stats.chartMatiere?.length > 0 ? (
+              <ResponsiveContainer
+                width='100%'
+                height={300}
+              >
+                <BarChart data={stats.chartMatiere}>
+                  <CartesianGrid strokeDasharray='3 3' />
+                  <XAxis
+                    dataKey='matiere'
+                    angle={-45}
+                    textAnchor='end'
+                    height={100}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <YAxis
+                    domain={[0, 100]}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <Tooltip />
+                  <Legend />
+                  <Bar
+                    dataKey='taux'
+                    fill='#6366f1'
+                    name='Taux de présence (%)'
+                    radius={[8, 8, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className='h-[300px] flex items-center justify-center text-gray-500'>
+                Aucune donnée
+              </div>
+            )}
           </CardContent>
         </Card>
 
+        {/* Répartition présences/absences */}
         <Card>
           <CardHeader>
-            <CardTitle>Répartition des Présences</CardTitle>
+            <CardTitle className='flex items-center gap-2'>
+              <TrendingUp className='h-5 w-5' />
+              Répartition des Présences
+            </CardTitle>
             <CardDescription>Distribution de ton assiduité</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={(entry) => `${entry.name}: ${entry.value}`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            {stats.pieData?.some((d: any) => d.value > 0) ? (
+              <ResponsiveContainer
+                width='100%'
+                height={300}
+              >
+                <PieChart>
+                  <Pie
+                    data={stats.pieData}
+                    cx='50%'
+                    cy='50%'
+                    labelLine={false}
+                    label={(entry) => `${entry.name}: ${entry.value}`}
+                    outerRadius={100}
+                    fill='#8884d8'
+                    dataKey='value'
+                  >
+                    {stats.pieData.map((entry: any, index: number) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.color}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className='h-[300px] flex items-center justify-center text-gray-500'>
+                Aucune donnée
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Subject Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Présence par Matière</CardTitle>
-          <CardDescription>Ton assiduité dans chaque cours</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {subjectData.map((subject) => (
-              <div key={subject.subject} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">{subject.subject}</span>
-                  <span className="text-sm">{subject.taux}%</span>
-                </div>
-                <Progress value={subject.taux} />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Alert if needed */}
-      {stats.attendanceRate < 80 && (
-        <Card className="bg-red-50 border-red-200">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+      {/* Alerte si besoin */}
+      {stats.presences?.tauxPresence < 80 && (
+        <Card className='bg-red-50 border-red-200'>
+          <CardContent className='pt-6'>
+            <div className='flex items-start gap-3'>
+              <AlertCircle className='h-5 w-5 text-red-600 mt-0.5' />
               <div>
-                <p className="text-red-800">
-                  <strong>Attention!</strong> Ton taux de présence est inférieur à 80%.
+                <p className='font-semibold text-red-800'>
+                  Attention! Ton taux de présence est inférieur à 80%.
                 </p>
-                <p className="text-sm text-red-700 mt-1">
-                  Essaie d'être plus assidu pour améliorer tes résultats et gagner des bonus!
+                <p className='text-sm text-red-700 mt-1'>
+                  Essaie d'être plus assidu pour améliorer tes résultats et
+                  gagner des bonus!
                 </p>
               </div>
             </div>

@@ -207,3 +207,273 @@ export const getStatsEnseignant = async (req, res) =>
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 };
+
+/**
+ * ⭐ DASHBOARD ÉTUDIANT
+ * GET /api/dashboard/student/:id
+ */
+export const getStudentDashboard = async (req, res) =>
+{
+    try
+    {
+        const { id } = req.params;
+
+        // 1. Infos étudiant + classe
+        const etudiantData = await query(`
+      SELECT 
+        e.id_etudiant,
+        e.streak_count,
+        e.last_present_date,
+        e.bonus_gagnes,
+        u.prenom,
+        u.nom,
+        c.nom_classe
+      FROM Etudiant e
+      JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+      LEFT JOIN Classe c ON e.id_classe = c.id_classe
+      WHERE e.id_etudiant = ?
+    `, [id]);
+
+        if (etudiantData.length === 0)
+        {
+            return res.status(404).json({ success: false, message: 'Étudiant non trouvé' });
+        }
+
+        const etudiant = etudiantData[0];
+
+        // 2. Stats présences
+        const presenceStats = await query(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN statut = 'present' THEN 1 ELSE 0 END) as presents,
+        SUM(CASE WHEN statut = 'absent' THEN 1 ELSE 0 END) as absents,
+        SUM(CASE WHEN statut = 'retard' THEN 1 ELSE 0 END) as retards
+      FROM Presence
+      WHERE id_etudiant = ?
+    `, [id]);
+
+        const stats = presenceStats[0];
+        const tauxPresence = stats.total > 0
+            ? ((stats.presents / stats.total) * 100).toFixed(1)
+            : 0;
+
+        // 3. Présences par semaine (4 dernières semaines)
+        const presencesParSemaine = await query(`
+      SELECT 
+        WEEK(s.date_seance) as semaine,
+        YEAR(s.date_seance) as annee,
+        COUNT(*) as total,
+        SUM(CASE WHEN p.statut = 'present' THEN 1 ELSE 0 END) as presents
+      FROM Presence p
+      JOIN Seance s ON p.id_seance = s.id_seance
+      WHERE p.id_etudiant = ?
+        AND s.date_seance >= DATE_SUB(NOW(), INTERVAL 4 WEEK)
+      GROUP BY semaine, annee
+      ORDER BY annee, semaine
+    `, [id]);
+
+        // 4. Cours les plus suivis
+        const coursLesPlusSuivis = await query(`
+      SELECT 
+        m.nom_matiere,
+        COUNT(*) as total_presences,
+        SUM(CASE WHEN p.statut = 'present' THEN 1 ELSE 0 END) as presents
+      FROM Presence p
+      JOIN Seance s ON p.id_seance = s.id_seance
+      JOIN Cours co ON s.id_cours = co.id_cours
+      JOIN Matiere m ON co.id_matiere = m.id_matiere
+      WHERE p.id_etudiant = ?
+      GROUP BY m.id_matiere, m.nom_matiere
+      ORDER BY presents DESC
+      LIMIT 5
+    `, [id]);
+
+        // 5. Prochains cours (cette semaine)
+        const prochainesCours = await query(`
+      SELECT 
+        s.date_seance,
+        s.heure_debut,
+        s.heure_fin,
+        s.id_salle,
+        m.nom_matiere,
+        CONCAT(u.prenom, ' ', u.nom) as prof_nom
+      FROM Seance s
+      JOIN Cours co ON s.id_cours = co.id_cours
+      JOIN Matiere m ON co.id_matiere = m.id_matiere
+      JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
+      JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+      WHERE co.id_classe = (SELECT id_classe FROM Etudiant WHERE id_etudiant = ?)
+        AND s.date_seance >= CURDATE()
+        AND s.date_seance <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+        AND s.statut NOT IN ('annulee')
+      ORDER BY s.date_seance, s.heure_debut
+      LIMIT 5
+    `, [id]);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                etudiant: {
+                    nom: `${etudiant.prenom} ${etudiant.nom}`,
+                    classe: etudiant.nom_classe,
+                    streak: etudiant.streak_count,
+                    bonus: parseFloat(etudiant.bonus_gagnes)
+                },
+                presences: {
+                    total: stats.total,
+                    presents: stats.presents,
+                    absents: stats.absents,
+                    retards: stats.retards,
+                    tauxPresence: parseFloat(tauxPresence)
+                },
+                presencesParSemaine,
+                coursLesPlusSuivis,
+                prochainesCours
+            }
+        });
+
+    } catch (error)
+    {
+        console.error('Erreur getStudentDashboard:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+};
+
+/**
+ * ⭐ DASHBOARD ENSEIGNANT
+ * GET /api/dashboard/teacher/:id
+ */
+export const getTeacherDashboard = async (req, res) =>
+{
+    try
+    {
+        const { id } = req.params;
+
+        // 1. Infos enseignant
+        const enseignantData = await query(`
+      SELECT 
+        e.id_enseignant,
+        u.prenom,
+        u.nom,
+        e.specialite,
+        d.nom_departement
+      FROM Enseignant e
+      JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
+      LEFT JOIN Departement d ON e.id_departement = d.id_departement
+      WHERE e.id_enseignant = ?
+    `, [id]);
+
+        if (enseignantData.length === 0)
+        {
+            return res.status(404).json({ success: false, message: 'Enseignant non trouvé' });
+        }
+
+        const enseignant = enseignantData[0];
+
+        // 2. Nombre de cours enseignés
+        const coursEnseignes = await query(`
+      SELECT COUNT(DISTINCT id_cours) as total
+      FROM Cours
+      WHERE id_enseignant_titulaire = ?
+    `, [id]);
+
+        // 3. Séances cette semaine
+        const seancesCetteSemaine = await query(`
+      SELECT COUNT(*) as total
+      FROM Seance s
+      WHERE s.id_enseignant_effectif = ?
+        AND WEEK(s.date_seance) = WEEK(CURDATE())
+        AND YEAR(s.date_seance) = YEAR(CURDATE())
+    `, [id]);
+
+        // 4. Classes enseignées (distinctes)
+        const classesEnseignees = await query(`
+      SELECT DISTINCT c.nom_classe, c.niveau
+      FROM Cours co
+      JOIN Classe c ON co.id_classe = c.id_classe
+      WHERE co.id_enseignant_titulaire = ?
+      ORDER BY c.niveau, c.nom_classe
+    `, [id]);
+
+        // 5. Remplacements effectués
+        const remplacements = await query(`
+      SELECT COUNT(*) as total
+      FROM Remplacement
+      WHERE id_enseignant_remplacant = ?
+        AND statut = 'accepte'
+    `, [id]);
+
+        // 6. Séances par statut
+        const seancesParStatut = await query(`
+      SELECT 
+        statut,
+        COUNT(*) as total
+      FROM Seance
+      WHERE id_enseignant_effectif = ?
+      GROUP BY statut
+    `, [id]);
+
+        // 7. Taux présence moyen des étudiants dans ses cours
+        const tauxPresenceMoyen = await query(`
+      SELECT 
+        COUNT(*) as total_presences,
+        SUM(CASE WHEN p.statut = 'present' THEN 1 ELSE 0 END) as presents
+      FROM Presence p
+      JOIN Seance s ON p.id_seance = s.id_seance
+      JOIN Cours co ON s.id_cours = co.id_cours
+      WHERE co.id_enseignant_titulaire = ?
+    `, [id]);
+
+        const presenceData = tauxPresenceMoyen[0];
+        const tauxPresence = presenceData.total_presences > 0
+            ? ((presenceData.presents / presenceData.total_presences) * 100).toFixed(1)
+            : 0;
+
+        // 8. Prochaines séances
+        const prochainesSeances = await query(`
+      SELECT 
+        s.date_seance,
+        s.heure_debut,
+        s.heure_fin,
+        s.id_salle,
+        s.statut,
+        m.nom_matiere,
+        c.nom_classe
+      FROM Seance s
+      JOIN Cours co ON s.id_cours = co.id_cours
+      JOIN Matiere m ON co.id_matiere = m.id_matiere
+      JOIN Classe c ON co.id_classe = c.id_classe
+      WHERE s.id_enseignant_effectif = ?
+        AND s.date_seance >= CURDATE()
+        AND s.date_seance <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+      ORDER BY s.date_seance, s.heure_debut
+      LIMIT 5
+    `, [id]);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                enseignant: {
+                    nom: `${enseignant.prenom} ${enseignant.nom}`,
+                    specialite: enseignant.specialite,
+                    departement: enseignant.nom_departement
+                },
+                stats: {
+                    coursEnseignes: coursEnseignes[0].total,
+                    seancesCetteSemaine: seancesCetteSemaine[0].total,
+                    classesEnseignees: classesEnseignees.length,
+                    remplacements: remplacements[0].total,
+                    tauxPresenceMoyen: parseFloat(tauxPresence)
+                },
+                seancesParStatut,
+                classesEnseignees,
+                prochainesSeances
+            }
+        });
+
+    } catch (error)
+    {
+        console.error('Erreur getTeacherDashboard:', error);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+};
