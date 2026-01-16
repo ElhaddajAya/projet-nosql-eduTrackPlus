@@ -209,7 +209,7 @@ export const getStatsEnseignant = async (req, res) =>
 };
 
 /**
- * ⭐ DASHBOARD ÉTUDIANT
+ * ⭐ DASHBOARD ÉTUDIANT - VERSION CORRIGÉE
  * GET /api/dashboard/student/:id
  */
 export const getStudentDashboard = async (req, res) =>
@@ -218,10 +218,13 @@ export const getStudentDashboard = async (req, res) =>
     {
         const { id } = req.params;
 
+        console.log(`📊 Dashboard Étudiant - ID: ${id}`);
+
         // 1. Infos étudiant + classe
         const etudiantData = await query(`
       SELECT 
         e.id_etudiant,
+        e.id_classe,
         e.streak_count,
         e.last_present_date,
         e.bonus_gagnes,
@@ -240,43 +243,49 @@ export const getStudentDashboard = async (req, res) =>
         }
 
         const etudiant = etudiantData[0];
+        console.log(`✅ Étudiant: ${etudiant.prenom} ${etudiant.nom}, Classe: ${etudiant.nom_classe}`);
 
-        // 2. Stats présences
+        // ✅ 2. Stats présences - CORRIGÉ
         const presenceStats = await query(`
       SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN statut = 'present' THEN 1 ELSE 0 END) as presents,
-        SUM(CASE WHEN statut = 'absent' THEN 1 ELSE 0 END) as absents,
-        SUM(CASE WHEN statut = 'retard' THEN 1 ELSE 0 END) as retards
-      FROM Presence
-      WHERE id_etudiant = ?
+        COUNT(DISTINCT p.id_presence) as total,
+        SUM(CASE WHEN p.statut = 'present' THEN 1 ELSE 0 END) as presents,
+        SUM(CASE WHEN p.statut = 'absent' THEN 1 ELSE 0 END) as absents,
+        SUM(CASE WHEN p.statut = 'retard' THEN 1 ELSE 0 END) as retards
+      FROM Presence p
+      WHERE p.id_etudiant = ?
     `, [id]);
 
-        const stats = presenceStats[0];
+        const stats = presenceStats[0] || { total: 0, presents: 0, absents: 0, retards: 0 };
         const tauxPresence = stats.total > 0
             ? ((stats.presents / stats.total) * 100).toFixed(1)
             : 0;
 
-        // 3. Présences par semaine (4 dernières semaines)
+        console.log(`📊 Stats brutes:`, stats);
+        console.log(`📊 Taux calculé: ${tauxPresence}%`);
+
+        // ✅ 3. Présences par semaine - SIMPLIFIÉ
         const presencesParSemaine = await query(`
       SELECT 
-        WEEK(s.date_seance) as semaine,
-        YEAR(s.date_seance) as annee,
+        DATE_FORMAT(s.date_seance, '%Y-%m-%d') as date,
         COUNT(*) as total,
         SUM(CASE WHEN p.statut = 'present' THEN 1 ELSE 0 END) as presents
       FROM Presence p
       JOIN Seance s ON p.id_seance = s.id_seance
       WHERE p.id_etudiant = ?
         AND s.date_seance >= DATE_SUB(NOW(), INTERVAL 4 WEEK)
-      GROUP BY semaine, annee
-      ORDER BY annee, semaine
+      GROUP BY DATE_FORMAT(s.date_seance, '%Y-%m-%d')
+      ORDER BY s.date_seance
     `, [id]);
 
-        // 4. Cours les plus suivis
+        console.log(`📊 Présences/semaine:`, presencesParSemaine.length);
+
+        // ✅ 4. Cours les plus suivis - AVEC VÉRIFICATION
         const coursLesPlusSuivis = await query(`
       SELECT 
+        m.id_matiere,
         m.nom_matiere,
-        COUNT(*) as total_presences,
+        COUNT(DISTINCT p.id_presence) as total_presences,
         SUM(CASE WHEN p.statut = 'present' THEN 1 ELSE 0 END) as presents
       FROM Presence p
       JOIN Seance s ON p.id_seance = s.id_seance
@@ -284,17 +293,22 @@ export const getStudentDashboard = async (req, res) =>
       JOIN Matiere m ON co.id_matiere = m.id_matiere
       WHERE p.id_etudiant = ?
       GROUP BY m.id_matiere, m.nom_matiere
+      HAVING total_presences > 0
       ORDER BY presents DESC
       LIMIT 5
     `, [id]);
 
-        // 5. Prochains cours (cette semaine)
+        console.log(`📚 Cours suivis:`, coursLesPlusSuivis.map(c => `${c.nom_matiere}: ${c.presents}/${c.total_presences}`));
+
+        // ✅ 5. Prochains cours - AVEC FILTRE WEEKENDS
         const prochainesCours = await query(`
       SELECT 
+        s.id_seance,
         s.date_seance,
         s.heure_debut,
         s.heure_fin,
         s.id_salle,
+        s.statut,
         m.nom_matiere,
         CONCAT(u.prenom, ' ', u.nom) as prof_nom
       FROM Seance s
@@ -302,28 +316,31 @@ export const getStudentDashboard = async (req, res) =>
       JOIN Matiere m ON co.id_matiere = m.id_matiere
       JOIN Enseignant e ON s.id_enseignant_effectif = e.id_enseignant
       JOIN Utilisateur u ON e.id_utilisateur = u.id_utilisateur
-      WHERE co.id_classe = (SELECT id_classe FROM Etudiant WHERE id_etudiant = ?)
+      WHERE co.id_classe = ?
         AND s.date_seance >= CURDATE()
         AND s.date_seance <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
         AND s.statut NOT IN ('annulee')
+        AND DAYOFWEEK(s.date_seance) BETWEEN 2 AND 6
       ORDER BY s.date_seance, s.heure_debut
-      LIMIT 5
-    `, [id]);
+      LIMIT 10
+    `, [etudiant.id_classe]);
+
+        console.log(`📅 Prochains cours:`, prochainesCours.length);
 
         res.status(200).json({
             success: true,
             data: {
                 etudiant: {
                     nom: `${etudiant.prenom} ${etudiant.nom}`,
-                    classe: etudiant.nom_classe,
-                    streak: etudiant.streak_count,
-                    bonus: parseFloat(etudiant.bonus_gagnes)
+                    classe: etudiant.nom_classe || "Non assigné",
+                    streak: etudiant.streak_count || 0,
+                    bonus: parseFloat(etudiant.bonus_gagnes || 0)
                 },
                 presences: {
-                    total: stats.total,
-                    presents: stats.presents,
-                    absents: stats.absents,
-                    retards: stats.retards,
+                    total: parseInt(stats.total) || 0,
+                    presents: parseInt(stats.presents) || 0,
+                    absents: parseInt(stats.absents) || 0,
+                    retards: parseInt(stats.retards) || 0,
                     tauxPresence: parseFloat(tauxPresence)
                 },
                 presencesParSemaine,
@@ -334,13 +351,13 @@ export const getStudentDashboard = async (req, res) =>
 
     } catch (error)
     {
-        console.error('Erreur getStudentDashboard:', error);
+        console.error('❌ Erreur getStudentDashboard:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 };
 
 /**
- * ⭐ DASHBOARD ENSEIGNANT
+ * ⭐ DASHBOARD ENSEIGNANT - VERSION CORRIGÉE
  * GET /api/dashboard/teacher/:id
  */
 export const getTeacherDashboard = async (req, res) =>
@@ -348,6 +365,8 @@ export const getTeacherDashboard = async (req, res) =>
     try
     {
         const { id } = req.params;
+
+        console.log(`📊 Dashboard Enseignant - ID: ${id}`);
 
         // 1. Infos enseignant
         const enseignantData = await query(`
@@ -369,31 +388,37 @@ export const getTeacherDashboard = async (req, res) =>
         }
 
         const enseignant = enseignantData[0];
+        console.log(`✅ Enseignant: ${enseignant.prenom} ${enseignant.nom}`);
 
-        // 2. Nombre de cours enseignés
+        // ✅ 2. Nombre de cours DISTINCTS
         const coursEnseignes = await query(`
       SELECT COUNT(DISTINCT id_cours) as total
       FROM Cours
       WHERE id_enseignant_titulaire = ?
     `, [id]);
 
-        // 3. Séances cette semaine
+        // ✅ 3. Séances cette semaine - AVEC FILTRE WEEKENDS
         const seancesCetteSemaine = await query(`
       SELECT COUNT(*) as total
       FROM Seance s
       WHERE s.id_enseignant_effectif = ?
-        AND WEEK(s.date_seance) = WEEK(CURDATE())
+        AND WEEK(s.date_seance, 1) = WEEK(CURDATE(), 1)
         AND YEAR(s.date_seance) = YEAR(CURDATE())
+        AND DAYOFWEEK(s.date_seance) BETWEEN 2 AND 6
     `, [id]);
 
-        // 4. Classes enseignées (distinctes)
+        console.log(`📅 Séances cette semaine: ${seancesCetteSemaine[0].total}`);
+
+        // ✅ 4. Classes enseignées
         const classesEnseignees = await query(`
-      SELECT DISTINCT c.nom_classe, c.niveau
+      SELECT DISTINCT c.id_classe, c.nom_classe, c.niveau
       FROM Cours co
       JOIN Classe c ON co.id_classe = c.id_classe
       WHERE co.id_enseignant_titulaire = ?
       ORDER BY c.niveau, c.nom_classe
     `, [id]);
+
+        console.log(`🎓 Classes: ${classesEnseignees.length}`);
 
         // 5. Remplacements effectués
         const remplacements = await query(`
@@ -403,7 +428,7 @@ export const getTeacherDashboard = async (req, res) =>
         AND statut = 'accepte'
     `, [id]);
 
-        // 6. Séances par statut
+        // ✅ 6. Séances par statut - TOUTES LES SÉANCES
         const seancesParStatut = await query(`
       SELECT 
         statut,
@@ -413,7 +438,9 @@ export const getTeacherDashboard = async (req, res) =>
       GROUP BY statut
     `, [id]);
 
-        // 7. Taux présence moyen des étudiants dans ses cours
+        console.log(`📊 Séances par statut:`, seancesParStatut);
+
+        // 7. Taux présence moyen
         const tauxPresenceMoyen = await query(`
       SELECT 
         COUNT(*) as total_presences,
@@ -429,9 +456,10 @@ export const getTeacherDashboard = async (req, res) =>
             ? ((presenceData.presents / presenceData.total_presences) * 100).toFixed(1)
             : 0;
 
-        // 8. Prochaines séances
+        // ✅ 8. Prochaines séances - AVEC FILTRE WEEKENDS
         const prochainesSeances = await query(`
       SELECT 
+        s.id_seance,
         s.date_seance,
         s.heure_debut,
         s.heure_fin,
@@ -446,23 +474,26 @@ export const getTeacherDashboard = async (req, res) =>
       WHERE s.id_enseignant_effectif = ?
         AND s.date_seance >= CURDATE()
         AND s.date_seance <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+        AND DAYOFWEEK(s.date_seance) BETWEEN 2 AND 6
       ORDER BY s.date_seance, s.heure_debut
-      LIMIT 5
+      LIMIT 10
     `, [id]);
+
+        console.log(`📅 Prochaines séances: ${prochainesSeances.length}`);
 
         res.status(200).json({
             success: true,
             data: {
                 enseignant: {
                     nom: `${enseignant.prenom} ${enseignant.nom}`,
-                    specialite: enseignant.specialite,
-                    departement: enseignant.nom_departement
+                    specialite: enseignant.specialite || "Non spécifiée",
+                    departement: enseignant.nom_departement || "Non assigné"
                 },
                 stats: {
-                    coursEnseignes: coursEnseignes[0].total,
-                    seancesCetteSemaine: seancesCetteSemaine[0].total,
-                    classesEnseignees: classesEnseignees.length,
-                    remplacements: remplacements[0].total,
+                    coursEnseignes: coursEnseignes[0].total || 0,
+                    seancesCetteSemaine: seancesCetteSemaine[0].total || 0,
+                    classesEnseignees: classesEnseignees.length || 0,
+                    remplacements: remplacements[0].total || 0,
                     tauxPresenceMoyen: parseFloat(tauxPresence)
                 },
                 seancesParStatut,
@@ -473,7 +504,7 @@ export const getTeacherDashboard = async (req, res) =>
 
     } catch (error)
     {
-        console.error('Erreur getTeacherDashboard:', error);
+        console.error('❌ Erreur getTeacherDashboard:', error);
         res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 };

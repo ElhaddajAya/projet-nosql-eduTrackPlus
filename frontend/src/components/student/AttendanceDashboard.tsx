@@ -62,12 +62,14 @@ export default function AttendanceDashboard({
         });
 
         if (res.data?.success) {
-          setIdEtudiant(res.data.data.id_etudiant);
+          const id = res.data.data.id_etudiant;
+          console.log("✅ ID Étudiant récupéré:", id);
+          setIdEtudiant(id);
         } else {
           toast.error("Profil étudiant non trouvé");
         }
       } catch (error: any) {
-        console.error("Erreur récupération id_etudiant:", error);
+        console.error("❌ Erreur récupération id_etudiant:", error);
         toast.error("Erreur chargement profil");
       }
     };
@@ -82,6 +84,8 @@ export default function AttendanceDashboard({
       try {
         setLoading(true);
 
+        console.log(`📊 Chargement stats pour étudiant ${idEtudiant}...`);
+
         const res = await axios.get(
           `${API_URL}/dashboard/student/${idEtudiant}`,
           {
@@ -95,34 +99,60 @@ export default function AttendanceDashboard({
         }
 
         const data = res.data.data;
+        console.log("📊 Données reçues:", data);
 
-        // Données pie chart
-        const pieData = [
-          {
-            name: "Présent",
-            value: data.presences?.presents || 0,
-            color: COLORS.present,
-          },
-          {
-            name: "Absent",
-            value: data.presences?.absents || 0,
-            color: COLORS.absent,
-          },
-          {
-            name: "Retard",
-            value: data.presences?.retards || 0,
-            color: COLORS.retard,
-          },
-        ];
+        // ✅ VÉRIFIER LES DONNÉES DE PRÉSENCE
+        const presents = data.presences?.presents || 0;
+        const absents = data.presences?.absents || 0;
+        const retards = data.presences?.retards || 0;
+        const total = data.presences?.total || 0;
 
-        // ⭐ Graphique taux par matière (NOUVEAU)
-        const chartMatiere = (data.coursLesPlusSuivis || []).map((c: any) => ({
-          matiere: c.nom_matiere,
-          taux:
+        console.log(
+          `📊 Présences: ${presents}/${total} (${absents} absents, ${retards} retards)`
+        );
+
+        // ✅ CRÉER PIE DATA SEULEMENT SI DONNÉES EXISTENT
+        const pieData =
+          total > 0
+            ? [
+                {
+                  name: "Présent",
+                  value: presents,
+                  color: COLORS.present,
+                },
+                {
+                  name: "Absent",
+                  value: absents,
+                  color: COLORS.absent,
+                },
+                {
+                  name: "Retard",
+                  value: retards,
+                  color: COLORS.retard,
+                },
+              ].filter((d) => d.value > 0)
+            : [];
+
+        console.log("📊 pieData:", pieData);
+
+        // ✅ GRAPHIQUE PAR MATIÈRE
+        const chartMatiere = (data.coursLesPlusSuivis || []).map((c: any) => {
+          const taux =
             c.total_presences > 0
               ? parseFloat(((c.presents / c.total_presences) * 100).toFixed(1))
-              : 0,
-        }));
+              : 0;
+
+          console.log(
+            `  📚 ${c.nom_matiere}: ${c.presents}/${c.total_presences} = ${taux}%`
+          );
+
+          return {
+            matiere: c.nom_matiere,
+            taux,
+          };
+        });
+
+        console.log("📊 chartMatiere:", chartMatiere);
 
         setStats({
           ...data,
@@ -130,7 +160,7 @@ export default function AttendanceDashboard({
           chartMatiere,
         });
       } catch (error: any) {
-        console.error("Erreur fetch stats:", error);
+        console.error("❌ Erreur fetch stats:", error);
         toast.error("Erreur chargement statistiques");
       } finally {
         setLoading(false);
@@ -171,7 +201,9 @@ export default function AttendanceDashboard({
           Bonjour, {stats.etudiant?.nom} ! 👋
         </h2>
         <p className='opacity-90'>
-          Continue comme ça! Ton taux de présence est excellent.
+          {stats.presences?.tauxPresence >= 80
+            ? "Continue comme ça! Ton taux de présence est excellent."
+            : "Tu peux améliorer ton taux de présence!"}
         </p>
       </div>
 
@@ -192,7 +224,8 @@ export default function AttendanceDashboard({
               className='mt-2'
             />
             <p className='text-xs text-gray-600 mt-2'>
-              {stats.presences?.presents}/{stats.presences?.total} séances
+              {stats.presences?.presents || 0}/{stats.presences?.total || 0}{" "}
+              séances
             </p>
           </CardContent>
         </Card>
@@ -296,7 +329,7 @@ export default function AttendanceDashboard({
 
       {/* Graphiques */}
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
-        {/* ⭐ NOUVEAU : Taux par matière */}
+        {/* ⭐ GRAPHIQUE PAR MATIÈRE */}
         <Card>
           <CardHeader>
             <CardTitle className='flex items-center gap-2'>
@@ -306,7 +339,7 @@ export default function AttendanceDashboard({
             <CardDescription>Ton assiduité dans chaque cours</CardDescription>
           </CardHeader>
           <CardContent>
-            {stats.chartMatiere?.length > 0 ? (
+            {stats.chartMatiere && stats.chartMatiere.length > 0 ? (
               <ResponsiveContainer
                 width='100%'
                 height={300}
@@ -335,14 +368,18 @@ export default function AttendanceDashboard({
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className='h-[300px] flex items-center justify-center text-gray-500'>
-                Aucune donnée
+              <div className='h-[300px] flex flex-col items-center justify-center text-gray-500'>
+                <BookOpen className='h-16 w-16 mb-4 opacity-20' />
+                <p className='text-lg font-medium'>Aucune donnée</p>
+                <p className='text-sm mt-2'>
+                  Assiste à des cours pour voir tes stats
+                </p>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Répartition présences/absences */}
+        {/* ⭐ GRAPHIQUE PIE - CORRIGÉ */}
         <Card>
           <CardHeader>
             <CardTitle className='flex items-center gap-2'>
@@ -352,7 +389,7 @@ export default function AttendanceDashboard({
             <CardDescription>Distribution de ton assiduité</CardDescription>
           </CardHeader>
           <CardContent>
-            {stats.pieData?.some((d: any) => d.value > 0) ? (
+            {stats.pieData && stats.pieData.length > 0 ? (
               <ResponsiveContainer
                 width='100%'
                 height={300}
@@ -380,8 +417,15 @@ export default function AttendanceDashboard({
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className='h-[300px] flex items-center justify-center text-gray-500'>
-                Aucune donnée
+              <div className='h-[300px] flex flex-col items-center justify-center text-gray-500'>
+                <TrendingUp className='h-16 w-16 mb-4 opacity-20' />
+                <p className='text-lg font-medium'>Aucune donnée disponible</p>
+                <p className='text-sm mt-2 text-center px-4'>
+                  Assiste à quelques cours pour voir tes statistiques ici
+                </p>
+                <div className='mt-4 text-xs text-gray-400'>
+                  Total: {stats.presences?.total || 0} séances
+                </div>
               </div>
             )}
           </CardContent>
@@ -389,7 +433,7 @@ export default function AttendanceDashboard({
       </div>
 
       {/* Alerte si besoin */}
-      {stats.presences?.tauxPresence < 80 && (
+      {stats.presences?.tauxPresence < 80 && stats.presences?.total > 0 && (
         <Card className='bg-red-50 border-red-200'>
           <CardContent className='pt-6'>
             <div className='flex items-start gap-3'>

@@ -84,30 +84,36 @@ const mapBackendStatusToUI = (s: ApiSeance["statut"]): UISession["status"] => {
   }
 };
 
-const getDayKey = (isoDate: string): UISession["day"] => {
-  // Extraire la date directement sans parse timezone
-  const dateStr = isoDate.split("T")[0]; // "2026-01-20"
+// ✅ FONCTION CORRIGÉE
+const getDayKey = (isoDate: string): UISession["day"] | null => {
+  const dateStr = isoDate.split("T")[0];
   const [year, month, day] = dateStr.split("-").map(Number);
 
-  // Créer date en UTC pour éviter les décalages timezone
-  const d = new Date(Date.UTC(year, month - 1, day));
-  const js = d.getUTCDay(); // ⭐ Utiliser getUTCDay() au lieu de getDay()
+  // ⭐ Utiliser date locale
+  const d = new Date(year, month - 1, day);
+  const dayIndex = d.getDay();
 
   console.log(
-    `🗓️ Date: ${dateStr} → Jour: ${js} (${
-      ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][js]
+    `🗓️ ${dateStr} → Jour ${dayIndex} (${
+      ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][dayIndex]
     })`
   );
 
-  if (js === 1) return "monday";
-  if (js === 2) return "tuesday";
-  if (js === 3) return "wednesday";
-  if (js === 4) return "thursday";
-  if (js === 5) return "friday";
-
-  // Si weekend, logger un warning
-  console.warn(`⚠️ Séance sur un weekend détectée: ${dateStr} (jour ${js})`);
-  return "monday"; // Fallback
+  switch (dayIndex) {
+    case 1:
+      return "monday";
+    case 2:
+      return "tuesday";
+    case 3:
+      return "wednesday";
+    case 4:
+      return "thursday";
+    case 5:
+      return "friday";
+    default:
+      console.warn(`⚠️ Weekend ignoré: ${dateStr}`);
+      return null;
+  }
 };
 
 export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
@@ -126,7 +132,6 @@ export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
   };
 
   const weekRange = useMemo(() => {
-    // Monday -> Friday range based on weekDate
     const base = new Date(weekDate);
     const day = base.getDay();
     const diffToMonday = (day === 0 ? -6 : 1) - day;
@@ -143,8 +148,46 @@ export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
     const fetchTeacherSchedule = async () => {
       try {
         setLoading(true);
+
+        // ⭐ Récupérer id_enseignant
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+        const id_utilisateur = user?.id || user?.id_utilisateur;
+
+        if (!id_utilisateur) {
+          toast.error("Utilisateur non connecté");
+          setUiSessions([]);
+          setLoading(false);
+          return;
+        }
+
+        const ensRes = await axios.get(`${API_URL}/enseignants`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!ensRes.data?.success) {
+          toast.error("Erreur récupération profil");
+          setUiSessions([]);
+          setLoading(false);
+          return;
+        }
+
+        const enseignants = ensRes.data.data || [];
+        const enseignant = enseignants.find(
+          (e: any) => e.id_utilisateur === id_utilisateur
+        );
+
+        if (!enseignant) {
+          toast.error("Profil enseignant non trouvé");
+          setUiSessions([]);
+          setLoading(false);
+          return;
+        }
+
+        const id_enseignant = enseignant.id_enseignant;
+
+        // ⭐ Charger emploi du temps
         const res = await axios.get(
-          `${API_URL}/emploi-temps/enseignant/${teacherId}`,
+          `${API_URL}/emploi-temps/enseignant/${id_enseignant}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -157,33 +200,44 @@ export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
         }
 
         const all: ApiSeance[] = res.data.data || [];
-        // filtrer semaine
+        console.log("📊 Toutes les séances:", all.length);
+
+        // ⭐ Filtrer par semaine
         const filtered = all.filter((s) => {
           const d = s.date_seance.split("T")[0];
-          return d >= weekRange.monday && d <= weekRange.friday;
+          const inRange = d >= weekRange.monday && d <= weekRange.friday;
+          console.log(`  ${d} → ${inRange ? "✅" : "❌"}`);
+          return inRange;
         });
 
-        const mapped: UISession[] = filtered.map((s) => ({
-          id: String(s.id_seance),
-          day: getDayKey(s.date_seance),
-          startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
-          endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
-          subject: s.nom_matiere || "Cours",
-          room: `Room ${s.id_salle}`,
-          status: mapBackendStatusToUI(s.statut),
-          className: s.nom_classe || "N/A",
-          // si tu ajoutes date_report en backend, tu peux la mapper ici
-          postponedTo: null,
-          isReplacement: s.statut === "remplacee",
-        }));
+        console.log("📊 Séances filtrées:", filtered.length);
 
+        // ⭐ Mapper et filtrer weekends
+        const mapped: UISession[] = filtered
+          .map((s) => {
+            const dayKey = getDayKey(s.date_seance);
+            if (!dayKey) return null;
+
+            return {
+              id: String(s.id_seance),
+              day: dayKey,
+              startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
+              endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
+              subject: s.nom_matiere || "Cours",
+              room: `Room ${s.id_salle}`,
+              status: mapBackendStatusToUI(s.statut),
+              className: s.nom_classe || "N/A",
+              postponedTo: null,
+              isReplacement: s.statut === "remplacee",
+            };
+          })
+          .filter((s): s is UISession => s !== null);
+
+        console.log("📊 Séances mappées:", mapped);
         setUiSessions(mapped);
       } catch (e: any) {
-        console.error(e);
-        toast.error(
-          e?.response?.data?.message ||
-            "Erreur serveur (emploi du temps enseignant)"
-        );
+        console.error("❌ Erreur:", e);
+        toast.error(e?.response?.data?.message || "Erreur serveur");
         setUiSessions([]);
       } finally {
         setLoading(false);
@@ -204,13 +258,11 @@ export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
 
   return (
     <div className='space-y-6'>
-      {/* Header */}
       <div>
         <h2 className='text-2xl'>Mon Emploi du Temps</h2>
         <p className='text-gray-500'>Mes cours de la semaine</p>
       </div>
 
-      {/* Summary Cards */}
       <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
         <Card>
           <CardContent className='pt-6'>
@@ -249,7 +301,6 @@ export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
         </Card>
       </div>
 
-      {/* Legend */}
       <Card>
         <CardHeader>
           <CardTitle className='text-lg'>Légende des couleurs</CardTitle>
@@ -280,7 +331,6 @@ export default function TeacherSchedule({ teacherId }: TeacherScheduleProps) {
         </CardContent>
       </Card>
 
-      {/* Weekly Schedule */}
       <Card>
         <CardHeader>
           <div className='flex items-center justify-between'>
