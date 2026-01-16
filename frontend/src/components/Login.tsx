@@ -156,8 +156,8 @@ export default function Login({ onLogin }: LoginProps) {
                 variant='outline'
                 size='sm'
                 onClick={() => {
-                  setEmail("teacher@test.com");
-                  setPassword("teacher123");
+                  setEmail("m.alami@emsi.ma");
+                  setPassword("Prof123!");
                 }}
               >
                 Prof
@@ -166,8 +166,8 @@ export default function Login({ onLogin }: LoginProps) {
                 variant='outline'
                 size='sm'
                 onClick={() => {
-                  setEmail("student.test@edutrackplus.com");
-                  setPassword("student123");
+                  setEmail("z.benmoussa@emsi.ma");
+                  setPassword("Student123!");
                 }}
               >
                 Étudiant

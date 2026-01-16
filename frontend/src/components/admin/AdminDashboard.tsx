@@ -36,12 +36,12 @@ export default function AdminDashboard({
       <header className='bg-white border-b border-gray-200'>
         <div className='flex items-center justify-between px-6 py-4'>
           <div className='flex items-center gap-3'>
-            <div className='h-10 w-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center'>
-              <GraduationCap className='h-6 w-6 text-white' />
+            <div className='flex items-center justify-center mb-4'>
+              <GraduationCap className='h-12 w-12 text-primary' />
             </div>
             <div>
-              <h1 className='text-xl'>EduManager</h1>
-              <p className='text-sm text-gray-500'>Mon Espace Étudiant</p>
+              <h1 className='text-xl'>EduTrack+</h1>
+              <p className='text-sm text-gray-500'>Espace Administrateur</p>
             </div>
           </div>
 
