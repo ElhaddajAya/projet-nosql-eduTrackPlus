@@ -7,7 +7,10 @@ import {
   CardTitle,
 } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Clock, MapPin, User } from "lucide-react";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { MapPin, User, ChevronLeft, ChevronRight } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -55,12 +58,15 @@ type ApiSeance = {
   date_seance: string;
   heure_debut: string;
   heure_fin: string;
-  id_salle: number;
+  id_salle: number | string;
   statut: "prevue" | "remplacee" | "reportee" | "annulee" | "rattrapage";
   nom_classe?: string;
   nom_matiere?: string;
   prof_prenom?: string;
   prof_nom?: string;
+  remplacant_prenom?: string;
+  remplacant_nom?: string;
+  date_report?: string;
 };
 
 type UISession = {
@@ -93,19 +99,10 @@ const mapBackendStatusToUI = (s: ApiSeance["statut"]): UISession["status"] => {
 };
 
 const getDayKey = (isoDate: string): UISession["day"] => {
-  // Extraire la date directement sans parse timezone
-  const dateStr = isoDate.split("T")[0]; // "2026-01-20"
+  const dateStr = isoDate.split("T")[0];
   const [year, month, day] = dateStr.split("-").map(Number);
-
-  // Créer date en UTC pour éviter les décalages timezone
   const d = new Date(Date.UTC(year, month - 1, day));
-  const js = d.getUTCDay(); // ⭐ Utiliser getUTCDay() au lieu de getDay()
-
-  console.log(
-    `🗓️ Date: ${dateStr} → Jour: ${js} (${
-      ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][js]
-    })`
-  );
+  const js = d.getUTCDay();
 
   if (js === 1) return "monday";
   if (js === 2) return "tuesday";
@@ -113,25 +110,38 @@ const getDayKey = (isoDate: string): UISession["day"] => {
   if (js === 4) return "thursday";
   if (js === 5) return "friday";
 
-  // Si weekend, logger un warning
   console.warn(`⚠️ Séance sur un weekend détectée: ${dateStr} (jour ${js})`);
-  return "monday"; // Fallback
+  return "monday";
 };
-
-function safeParseJson<T>(value: string | null): T | null {
-  if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
 
 export default function StudentSchedule({ studentId }: StudentScheduleProps) {
   const token = localStorage.getItem("token");
   const [loading, setLoading] = useState(false);
   const [className, setClassName] = useState<string>("");
   const [uiSessions, setUiSessions] = useState<UISession[]>([]);
+
+  // ⭐ AJOUT : Navigation semaine
+  const [weekDate, setWeekDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+
+  const changeWeek = (offset: number) => {
+    const d = new Date(weekDate);
+    d.setDate(d.getDate() + offset * 7);
+    setWeekDate(d.toISOString().split("T")[0]);
+  };
+
+  const weekRange = useMemo(() => {
+    const base = new Date(weekDate);
+    const day = base.getDay();
+    const diffToMonday = (day === 0 ? -6 : 1) - day;
+    const monday = new Date(base);
+    monday.setDate(base.getDate() + diffToMonday);
+    const friday = new Date(monday);
+    friday.setDate(monday.getDate() + 4);
+    const toIso = (x: Date) => x.toISOString().split("T")[0];
+    return { monday: toIso(monday), friday: toIso(friday) };
+  }, [weekDate]);
 
   const getSessionsByDay = (day: string) => {
     return uiSessions
@@ -145,23 +155,11 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
     (s) => s.status !== "normal"
   ).length;
 
-  const studentClassId = useMemo(() => {
-    const user = safeParseJson<any>(localStorage.getItem("user"));
-    return (
-      user?.id_classe ||
-      user?.classeId ||
-      user?.data?.id_classe ||
-      user?.data?.classeId ||
-      null
-    );
-  }, []);
-
   useEffect(() => {
     const fetchSchedule = async () => {
       try {
         setLoading(true);
 
-        // ⭐ NOUVELLE MÉTHODE : Appeler /api/etudiants/me
         let idClasse = null;
 
         try {
@@ -188,7 +186,6 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
           return;
         }
 
-        // Récupérer l'emploi du temps de la classe
         const res = await axios.get(
           `${API_URL}/emploi-temps/classe/${idClasse}`,
           {
@@ -205,18 +202,29 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
         const all: ApiSeance[] = res.data.data || [];
         setClassName(all[0]?.nom_classe || "");
 
-        const mapped: UISession[] = all.map((s) => ({
+        // ⭐ FILTRER PAR SEMAINE
+        const filtered = all.filter((s) => {
+          const d = s.date_seance.split("T")[0];
+          return d >= weekRange.monday && d <= weekRange.friday;
+        });
+
+        const mapped: UISession[] = filtered.map((s) => ({
           id: String(s.id_seance),
           day: getDayKey(s.date_seance),
           startTime: s.heure_debut?.slice(0, 5) || s.heure_debut,
           endTime: s.heure_fin?.slice(0, 5) || s.heure_fin,
           subject: s.nom_matiere || "Cours",
-          room: String(s.id_salle), // ⭐ Texte maintenant
+          room: String(s.id_salle),
           status: mapBackendStatusToUI(s.statut),
           teacherName:
             `${s.prof_prenom || ""} ${s.prof_nom || ""}`.trim() || "N/A",
-          replacementTeacherName: null,
-          postponedTo: null,
+          // ⭐ AJOUT : Nom remplaçant
+          replacementTeacherName:
+            s.remplacant_prenom && s.remplacant_nom
+              ? `${s.remplacant_prenom} ${s.remplacant_nom}`.trim()
+              : null,
+          // ⭐ AJOUT : Date report
+          postponedTo: s.date_report || null,
         }));
 
         setUiSessions(mapped);
@@ -232,12 +240,11 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
       }
     };
 
-    fetchSchedule(); // ⭐ Pas besoin de studentId maintenant
-  }, [token]); // ⭐ Dépendances : seulement token
+    fetchSchedule();
+  }, [token, weekRange]);
 
   return (
     <div className='space-y-6'>
-      {/* Header */}
       <div>
         <h2 className='text-2xl'>Mon Emploi du Temps</h2>
         <p className='text-gray-500'>
@@ -245,7 +252,6 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
         </p>
       </div>
 
-      {/* Summary Cards */}
       <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
         <Card className='bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200'>
           <CardContent className='pt-6'>
@@ -284,7 +290,6 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
         </Card>
       </div>
 
-      {/* Legend */}
       <Card>
         <CardHeader>
           <CardTitle className='text-lg'>Légende des couleurs</CardTitle>
@@ -315,12 +320,44 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
         </CardContent>
       </Card>
 
-      {/* Weekly Schedule */}
       <Card>
         <CardHeader>
-          <CardTitle>Emploi du temps de la semaine</CardTitle>
-          <CardDescription>Vue hebdomadaire de tes cours</CardDescription>
+          <div className='flex items-center justify-between'>
+            <div>
+              <CardTitle>Emploi du temps de la semaine</CardTitle>
+              <CardDescription>
+                Du {weekRange.monday} au {weekRange.friday}
+              </CardDescription>
+            </div>
+
+            {/* ✅ Navigation semaine */}
+            <div className='flex items-center gap-2'>
+              <Button
+                variant='outline'
+                size='icon'
+                onClick={() => changeWeek(-1)}
+              >
+                <ChevronLeft className='h-4 w-4' />
+              </Button>
+
+              <Input
+                type='date'
+                className='w-44'
+                value={weekDate}
+                onChange={(e) => setWeekDate(e.target.value)}
+              />
+
+              <Button
+                variant='outline'
+                size='icon'
+                onClick={() => changeWeek(1)}
+              >
+                <ChevronRight className='h-4 w-4' />
+              </Button>
+            </div>
+          </div>
         </CardHeader>
+
         <CardContent>
           {loading ? (
             <div className='text-center py-8 text-gray-400 text-sm'>
@@ -337,7 +374,9 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
                     className='space-y-3'
                   >
                     <div className='text-center pb-2 border-b border-indigo-200'>
-                      <h3 className='text-indigo-700'>{DAY_LABELS[day]}</h3>
+                      <h3 className='text-indigo-700 font-semibold'>
+                        {DAY_LABELS[day]}
+                      </h3>
                       <p className='text-xs text-gray-500'>
                         {daySessions.length} cours
                       </p>
@@ -349,14 +388,14 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
                           key={session.id}
                           className={`p-3 rounded-lg border-2 ${
                             STATUS_COLORS[session.status]
-                          } hover:shadow-lg transition-all cursor-pointer`}
+                          } hover:shadow-lg transition-all`}
                         >
                           <div className='flex items-start justify-between mb-2'>
                             <div className='flex items-center gap-2'>
                               <span className='text-lg'>
                                 {STATUS_EMOJI[session.status]}
                               </span>
-                              <div className='text-sm text-indigo-700'>
+                              <div className='text-sm font-medium text-indigo-700'>
                                 {session.startTime} - {session.endTime}
                               </div>
                             </div>
@@ -371,17 +410,19 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
                           </div>
 
                           <div>
-                            <p>{session.subject}</p>
+                            <p className='font-medium'>{session.subject}</p>
                             <div className='flex items-center gap-1 text-xs text-gray-600 mt-2'>
                               <User className='h-3 w-3' />
                               {session.teacherName}
                             </div>
 
-                            {session.replacementTeacherName && (
-                              <p className='text-xs text-blue-600 mt-1'>
-                                🔄 Remplacé par {session.replacementTeacherName}
-                              </p>
-                            )}
+                            {session.status === "replaced" &&
+                              session.replacementTeacherName && (
+                                <p className='text-xs text-blue-600 mt-1 font-medium'>
+                                  🔄 Remplacé par{" "}
+                                  {session.replacementTeacherName}
+                                </p>
+                              )}
                           </div>
 
                           <div className='flex items-center gap-1 mt-2 text-xs text-gray-500'>
@@ -389,20 +430,15 @@ export default function StudentSchedule({ studentId }: StudentScheduleProps) {
                             {session.room}
                           </div>
 
-                          {session.postponedTo && (
-                            <div className='mt-2 p-2 bg-green-100 rounded text-xs text-green-700'>
-                              ⏭️ Reporté au{" "}
-                              {new Date(session.postponedTo).toLocaleDateString(
-                                "fr-FR"
-                              )}
-                            </div>
-                          )}
-
-                          {session.status === "cancelled" && (
-                            <div className='mt-2 p-2 bg-red-100 rounded text-xs text-red-700'>
-                              ❌ Cours annulé
-                            </div>
-                          )}
+                          {session.status === "postponed" &&
+                            session.postponedTo && (
+                              <div className='mt-2 p-2 bg-green-100 rounded text-xs text-green-700 font-medium'>
+                                ⏭️ Reporté au{" "}
+                                {new Date(
+                                  session.postponedTo
+                                ).toLocaleDateString("fr-FR")}
+                              </div>
+                            )}
                         </div>
                       ))}
 
